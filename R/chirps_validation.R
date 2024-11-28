@@ -2,11 +2,14 @@ library(arrow)
 library(dplyr)
 library(sf)
 library(terra)
+library(fpp3)
 library(openxlsx)
 library(geodata)
 library(ggplot2)
 library(ggtext) 
 library(tidyverse)
+library(tsibble)
+library(tseries)
 
 setwd('TS_climatic/')
 list.files()
@@ -101,6 +104,7 @@ pol_ = function(x, r){
   return(chirps_closest)
 }
 
+sttns.points$n_chirps = 1 # (oct/2024)
 sttns.points$r = 0.05
 table(sttns.points$r)
 
@@ -109,7 +113,7 @@ for(i in 1:nrow(sttns.points)){
   pol_list[[i]]  = pol_(sttns.points[i,], sttns.points$r[i])  
 }
 
-df_ = data.frame(nchirps_ = sttns.points$n_chirps, nrow_ = NA)
+df_ = data.frame(nchirps_ =  sttns.points$n_chirps, nrow_ = NA)
 df_$ID = sttns.points$ID
   
 for(i in 1:nrow(sttns.points)){
@@ -194,15 +198,463 @@ for(i in 1:length(pol2_list)){
     rename('ID'='ID.x', 'n_chirps'='n_chirps.x')
 }
 
-# Calcula las medidas de desempeño ----
+# Evalua la estacionalidad de las series ----
+# La estacionariedad de una serie temporal implica que sus propiedades estadísticas
+## no cambian con el tiempo, en otras palabras no hay tendencia.
+
+idx_nchrips1 = which(df_$nchirps_==1)
+pol3_list = pol2_list[idx_nchrips1]
+# ADF test: serie chirps original ----
+# crear el ciclo for para calcular los ordenes de cada serie CHIRPS
+# Tsay recomienda diferenciar ordinalmente la serie para ajustar el modelo AR
+m_order = c()
+k = 1
+for(i in 1:length(pol3_list)){
+  m_order[k] <- tryCatch(
+    {
+      # Intenta ajustar el modelo AR
+      ar_obj <- ar(diff(pol3_list[[i]]$chirps.v2.0), method = 'mle')
+      ar_obj$order  # Devuelve el orden del modelo ajustado
+    },
+    error = function(e) {
+      # Si hay un error, devuelve -1
+      -1
+    }
+  )
+  # Incrementa el índice k
+  k <- k + 1
+}
+
+table(m_order)
+
+# calcula el orden sin diferenciar ordinalmente
+m_order2 = c()
+k = 1
+for(i in 1:length(pol3_list)){
+  m_order2[k] <- tryCatch(
+    {
+      # Intenta ajustar el modelo AR
+      ar_obj <- ar(pol3_list[[i]]$chirps.v2.0, method = 'mle')
+      ar_obj$order  # Devuelve el orden del modelo ajustado
+    },
+    error = function(e) {
+      # Si hay un error, devuelve -1
+      -1
+    }
+  )
+  # Incrementa el índice k
+  k <- k + 1
+}
+
+table(m_order2)
+
+## gráficos de las estaciones que arrojan error al ajustar un modelo AR ----
+no_order = which(m_order==-1)
+ID_no_order = c()
+k = 1
+for(i in no_order){
+  ID_no_order[k] = unique(pol3_list[[i]]$ID)
+  k <- k+1
+}
+
+plot(pol3_list[[7]]$chirps.v2.0, type = 'l', main = unique(pol3_list[[7]]$ID))
+ggplot() + 
+  geom_sf(data = shp_depto) +
+  geom_sf(data = sttns.points[sttns.points$ID%in% ID_no_order,], col = 'red', lwd = 0.2) +
+  geom_sf_text(aes(label = ID), data = sttns.points[sttns.points$ID %in% ID_no_order,], size = 3) 
+
+## prueba ADF librería aTSA ----
+m_order = ifelse(m_order==-1, 12, m_order)
+
+len_ = length(pol3_list)
+df_ADF = data.frame(lag_t1 = rep(0, len_), p.value_t1 = rep(0, len_),
+                    lag_t2 = rep(0, len_), p.value_t2 = rep(0, len_),
+                    lag_t3 = rep(0, len_), p.value_t3 = rep(0, len_))
+
+k = 1
+for(i in 1:length(pol3_list)){
+  # cambiar m_order por m_order2
+  l_ADF = aTSA::adf.test(pol3_list[[i]]$chirps.v2.0, nlag = m_order2[i], output = FALSE)
+  df_ADF$lag_t1[k] = which(l_ADF$type1[,'p.value']==max(l_ADF$type1[,'p.value']))
+  df_ADF$p.value_t1[k] = max(l_ADF$type1[,'p.value'])
+  df_ADF$lag_t2[k] = which(l_ADF$type2[,'p.value']==max(l_ADF$type2[,'p.value']))
+  df_ADF$p.value_t2[k] = max(l_ADF$type2[,'p.value'])
+  df_ADF$lag_t3[k] = which(l_ADF$type3[,'p.value']==max(l_ADF$type3[,'p.value']))
+  df_ADF$p.value_t3[k] = max(l_ADF$type3[,'p.value'])
+  k = k+1
+}
+
+df_ADF$RD_t1 = ifelse(df_ADF$p.value_t1<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+df_ADF$RD_t2 = ifelse(df_ADF$p.value_t2<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+df_ADF$RD_t3 = ifelse(df_ADF$p.value_t3<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+
+table(df_ADF$RD_t1)
+#df_ADF[(df_ADF$RD_t1==df_ADF$RD_t2) & (df_ADF$RD_t2==df_ADF$RD_t3),]
+#plot(pol3_list[[91]]$chirps.v2.0, type  ='l')
+#table(df_ADF$RD_t1,df_ADF$RD_t2, df_ADF$RD_t3)
+
+# prueba ADF librería urca
+interp_urdf_FM <- function(urdf, level="5pct") {
+  if(class(urdf) != "ur.df") stop('parameter is not of class ur.df from urca package')
+  if(!(level %in% c("1pct", "5pct", "10pct") ) ) stop('parameter level is not one of 1pct, 5pct, or 10pct')
+  
+  #cat( paste("At the", level, "level:\n") )
+  if(urdf@model == "none") {
+    #cat("The model is of type none\n")
+    tau1_crit = urdf@cval["tau1",level]
+    tau1_teststat = urdf@teststat["statistic","tau1"]
+    tau1_teststat_wi_crit = tau1_teststat > tau1_crit
+    if(tau1_teststat_wi_crit) {
+      rslt = "NO R_H0"
+      #cat("tau1: The null hypothesis is not rejected, unit root is present\n")
+    } else {
+      #cat("tau1: The null hypothesis is rejected, unit root is not present\n")
+      rslt ="R_H0 - estacionaria"
+    }}
+  return(rslt)}
+
+df_ur = data.frame(RD_t1 = rep('', 846))
+for(i in 1:length(pol3_list)){
+  ADF_ur = urca::ur.df(pol3_list[[i]]$chirps.v2.0, type  = "none", lags = m_order2[i], selectlags = "AIC")
+  df_ur$RD_t1[i] = interp_urdf_FM(ADF_ur)
+}
+
+table(df_ur$RD_t1)
+
+# diff estacional ----
+# Periodograma
+df_periodograma = data.frame(freq = rep(0, len_),
+                             period = rep(0, len_))
+
+# encontrar el periodo del ciclo estacional
+for(i in 1:length(pol3_list)){
+  Periodgrama_ = spectrum(pol3_list[[i]]$chirps.v2.0,log='no')
+  loc_ = which.max(Periodgrama_$spec)
+  df_periodograma$freq[i] = Periodgrama_$freq[loc_]
+  df_periodograma$period[i] = 1/Periodgrama_$freq[loc_]
+}
+
+#spectrum(pol3_list[[91]]$chirps.v2.0,log='no')
+#abline(v = 1/12, col = 'red')
+## plot muestra pixeles con periodos 4 y 6 ----
+p4 = which(round(df_periodograma$period)==4)
+p6 = which(round(df_periodograma$period)==6)
+set.seed(22112024)
+s_p6  = sample(p6, size = 1, replace = FALSE)
+
+spectrum(pol3_list[[s_p6]]$chirps.v2.0,log='no')
+abline(v = 1/12, col = 'red')
+abline(v = 1/6, col = 'red')
+abline(v = 1/4, col = 'red')
+
+y <- tsibble::tsibble(pol3_list[[s_p6]] %>% mutate(Date = as.Date(str_c(Date, '.01'), format = '%Y.%m.%d')) 
+                      %>%  select(c("Date" ,  "chirps.v2.0")), index = Date)
+
+y = y %>% mutate(Date = yearmonth(Date)) %>% 
+  as_tsibble(index = Date)
+
+gg_season(y, `chirps.v2.0`)
+gg_subseries(y, `chirps.v2.0`)
+
+table(round(df_periodograma$period))
+
+## diferencias estacionales ----
+d_chirps.v2.0 = list()
+for(i in 1:length(pol3_list)){
+  d_chirps.v2.0[[i]] = diff(pol3_list[[i]]$chirps.v2.0, 
+                            lag = round(df_periodograma$period[i]))
+}
+
+# crear el ciclo for para calcular los ordenes de cada serie CHIRPS diferenciadas estacionalmente
+# !!! dos escenarios sin diferenciar 
+m_order4 = c()
+k = 1
+for(i in 1:length(pol3_list)){
+  m_order4[k] <- tryCatch(
+    {
+      # Intenta ajustar el modelo AR
+      #ar_obj <- ar(diff(d_chirps.v2.0[[i]]), method = 'mle')
+      ar_obj <- ar(d_chirps.v2.0[[i]], method = 'mle')
+      ar_obj$order  # Devuelve el orden del modelo ajustado
+    },
+    error = function(e) {
+      # Si hay un error, devuelve -1
+      -1
+    }
+  )
+  # Incrementa el índice k
+  k <- k + 1
+}
+
+table(m_order4)
+m_order4 = ifelse(m_order3==-1,12, m_order4)
+## prueba ADF librería aTSA ----
+df_ADF2 = data.frame(lag_t1 = rep(0, len_), p.value_t1 = rep(0, len_),
+                     lag_t2 = rep(0, len_), p.value_t2 = rep(0, len_),
+                     lag_t3 = rep(0, len_), p.value_t3 = rep(0, len_))
+
+k = 1
+for(i in 1:length(pol3_list)){
+  l_ADF = aTSA::adf.test(d_chirps.v2.0[[i]], nlag = m_order4[i], output = FALSE)
+  df_ADF2$lag_t1[k] = which(l_ADF$type1[,'p.value']==max(l_ADF$type1[,'p.value']))
+  df_ADF2$p.value_t1[k] = max(l_ADF$type1[,'p.value'])
+  df_ADF2$lag_t2[k] = which(l_ADF$type2[,'p.value']==max(l_ADF$type2[,'p.value']))
+  df_ADF2$p.value_t2[k] = max(l_ADF$type2[,'p.value'])
+  df_ADF2$lag_t3[k] = which(l_ADF$type3[,'p.value']==max(l_ADF$type3[,'p.value']))
+  df_ADF2$p.value_t3[k] = max(l_ADF$type3[,'p.value'])
+  k = k+1
+}
+
+df_ADF2$RD_t1 = ifelse(df_ADF2$p.value_t1<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+df_ADF2$RD_t2 = ifelse(df_ADF2$p.value_t2<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+df_ADF2$RD_t3 = ifelse(df_ADF2$p.value_t3<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+
+table(df_ADF2$RD_t1)
+
+## prueba ADF librería urca ----
+df_ur = data.frame(RD_t1 = rep('', 846))
+for(i in 1:length(pol3_list)){
+  ADF_ur = urca::ur.df(d_chirps.v2.0[[i]], type  = "none", lags = m_order4[i], selectlags = "AIC")
+  df_ur$RD_t1[i] = interp_urdf_FM(ADF_ur)
+}
+
+table(df_ur$RD_t1)
+
+# Removiendo componente estacional usando LOESS ----
+set.seed(20112024)
+s = sample(1:length(pol3_list), size = 1)
+
+y <- tsibble::tsibble(pol3_list[[s]] %>% mutate(Date = as.Date(str_c(Date, '.01'), format = '%Y.%m.%d')) 
+                      %>%  select(c("Date" ,  "chirps.v2.0")), index = Date)
+
+y = y %>% mutate(Date = yearmonth(Date)) %>% 
+  as_tsibble(index = Date)
+
+# descomposición STL usando librería base ----
+# t.window = 21 (fpp3) auto
+nextodd <- function(x) {
+  x <- round(x)
+  if (x%%2 == 0) 
+    x <- x + 1
+  as.integer(x)}
+
+nextodd(ceiling(1.5 * frequency(y)/(1 - 1.5/(10 * as.integer(length(y)) + 1))))
+fit1 <- stl(y, s.window = "periodic")
+# t.window = 13 (fpp2)
+fit11<- stl(y, t.window = 13, s.window = "periodic")
+# Selecting a shorter trend window, avoid produces a trend-cycle component that is too rigid
+fit12<- stl(y, t.window = 7, s.window = "periodic")
+
+stl_chirps.v2.0 = list()
+for(i in 1:length(pol3_list)){
+  y <- tsibble::tsibble(pol3_list[[i]] %>% mutate(Date = as.Date(str_c(Date, '.01'), format = '%Y.%m.%d')) 
+                        %>%  select(c("Date" ,  "chirps.v2.0")), index = Date)
+  
+  y = y %>% mutate(Date = yearmonth(Date)) %>% 
+    as_tsibble(index = Date)
+  fit1 <- stl(y, s.window = "periodic")
+  #fit11<- stl(y, t.window = 13, s.window = "periodic")
+  #fit12<- stl(y, t.window = 7, s.window = "periodic")
+  stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit1$time.series[, "seasonal"]
+  #stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit11$time.series[, "seasonal"]
+  #stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit12$time.series[, "seasonal"]
+}
+
+plot(stl_chirps.v2.0[[s]])
+
+m_order5 = c()
+k = 1
+for(i in 1:length(pol3_list)){
+  m_order5[k] <- tryCatch(
+    {
+      # Intenta ajustar el modelo AR
+      #ar_obj <- ar(diff(stl_chirps.v2.0[[i]]), method = 'mle')
+      ar_obj <- ar(stl_chirps.v2.0[[i]], method = 'mle')
+      ar_obj$order  # Devuelve el orden del modelo ajustado
+    },
+    error = function(e) {
+      # Si hay un error, devuelve -1
+      -1
+    }
+  )
+  # Incrementa el índice k
+  k <- k + 1
+}
+
+table(m_order5)
+m_order5 = ifelse(m_order5==0,12, m_order5)
+
+## prueba ADF librería aTSA ----
+len_ = length(pol3_list)
+df_ADF3 = data.frame(lag_t1 = rep(0, len_), p.value_t1 = rep(0, len_),
+                     lag_t2 = rep(0, len_), p.value_t2 = rep(0, len_),
+                     lag_t3 = rep(0, len_), p.value_t3 = rep(0, len_))
+
+k = 1
+for(i in 1:length(pol3_list)){
+  l_ADF = aTSA::adf.test(stl_chirps.v2.0[[i]], nlag = m_order5[i], output = FALSE)
+  df_ADF3$lag_t1[k] = which(l_ADF$type1[,'p.value']==max(l_ADF$type1[,'p.value']))
+  df_ADF3$p.value_t1[k] = max(l_ADF$type1[,'p.value'])
+  df_ADF3$lag_t2[k] = which(l_ADF$type2[,'p.value']==max(l_ADF$type2[,'p.value']))
+  df_ADF3$p.value_t2[k] = max(l_ADF$type2[,'p.value'])
+  df_ADF3$lag_t3[k] = which(l_ADF$type3[,'p.value']==max(l_ADF$type3[,'p.value']))
+  df_ADF3$p.value_t3[k] = max(l_ADF$type3[,'p.value'])
+  k = k+1
+}
+
+df_ADF3$RD_t1 = ifelse(df_ADF3$p.value_t1<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+df_ADF3$RD_t2 = ifelse(df_ADF3$p.value_t2<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+df_ADF3$RD_t3 = ifelse(df_ADF3$p.value_t3<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+
+table(df_ADF3$RD_t1)
+
+## prueba ADF librería urca ----
+df_ur = data.frame(RD_t1 = rep('', 846))
+for(i in 1:length(pol3_list)){
+  ADF_ur = urca::ur.df(stl_chirps.v2.0[[i]], type  = "none", lags = m_order5[i], selectlags = "AIC")
+  df_ur$RD_t1[i] = interp_urdf_FM(ADF_ur)
+}
+
+table(df_ur$RD_t1)
+
+# descomposición STL usando librería feast ----
+# The default setting for monthly data is trend(window=21)
+fit2 = y |>
+  model(
+    STL(`chirps.v2.0` ~ 
+          season(window = "periodic"),
+        robust = TRUE)) |>
+  components() 
+
+# t.window = 13 (fpp2)
+fit21 = y |>
+  model(
+    STL(`chirps.v2.0` ~ trend(window = 13) + 
+          season(window = "periodic"),
+        robust = TRUE)) |>
+  components() 
+
+# Selecting a shorter trend window, avoid produces a trend-cycle component that is too rigid
+fit22 = y |>
+  model(
+    STL(`chirps.v2.0` ~ trend(window = 7) + 
+          season(window = "periodic"),
+        robust = TRUE)) |>
+  components() 
+
+stl_chirps.v2.0 = list()
+for(i in 1:length(pol3_list)){
+  y <- tsibble::tsibble(pol3_list[[i]] %>% mutate(Date = as.Date(str_c(Date, '.01'), format = '%Y.%m.%d')) 
+                        %>%  select(c("Date" ,  "chirps.v2.0")), index = Date)
+  
+  y = y %>% mutate(Date = yearmonth(Date)) %>% 
+    as_tsibble(index = Date)
+  
+  fit2 = y |>
+    model(
+      #STL(`chirps.v2.0` ~ trend(window = 13) +
+      STL(`chirps.v2.0` ~ 
+            season(window = "periodic"),
+          robust = TRUE)) |>
+    components() 
+  stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit2$season_year
+}
+
+head(y$chirps.v2.0 - fit2$season_year)
+head(fit2$season_adjust)
+
+m_order6 = c()
+k = 1
+for(i in 1:length(pol3_list)){
+  m_order6[k] <- tryCatch(
+    {
+      # Intenta ajustar el modelo AR
+      ar_obj <- ar(diff(stl_chirps.v2.0[[i]]), method = 'mle')
+      #ar_obj <- ar(stl_chirps.v2.0[[i]], method = 'mle')
+      ar_obj$order  # Devuelve el orden del modelo ajustado
+    },
+    error = function(e) {
+      # Si hay un error, devuelve -1
+      -1
+    }
+  )
+  # Incrementa el índice k
+  k <- k + 1
+}
+
+table(m_order6)
+m_order6 = ifelse(m_order6==-1,12, m_order6)
+
+## prueba ADF librería aTSA ----
+len_ = length(pol3_list)
+df_ADF4 = data.frame(lag_t1 = rep(0, len_), p.value_t1 = rep(0, len_),
+                     lag_t2 = rep(0, len_), p.value_t2 = rep(0, len_),
+                     lag_t3 = rep(0, len_), p.value_t3 = rep(0, len_))
+
+k = 1
+for(i in 1:length(pol3_list)){
+  l_ADF = aTSA::adf.test(stl_chirps.v2.0[[i]], nlag = m_order6[i], output = FALSE)
+  df_ADF4$lag_t1[k] = which(l_ADF$type1[,'p.value']==max(l_ADF$type1[,'p.value']))
+  df_ADF4$p.value_t1[k] = max(l_ADF$type1[,'p.value'])
+  df_ADF4$lag_t2[k] = which(l_ADF$type2[,'p.value']==max(l_ADF$type2[,'p.value']))
+  df_ADF4$p.value_t2[k] = max(l_ADF$type2[,'p.value'])
+  df_ADF4$lag_t3[k] = which(l_ADF$type3[,'p.value']==max(l_ADF$type3[,'p.value']))
+  df_ADF4$p.value_t3[k] = max(l_ADF$type3[,'p.value'])
+  k = k+1
+}
+
+df_ADF4$RD_t1 = ifelse(df_ADF4$p.value_t1<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+df_ADF4$RD_t2 = ifelse(df_ADF4$p.value_t2<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+df_ADF4$RD_t3 = ifelse(df_ADF4$p.value_t3<0.05, 'R_H0 - estacionaria', 'NO R_H0')
+
+table(df_ADF4$RD_t1)
+
+## prueba ADF librería urca ----
+df_ur = data.frame(RD_t1 = rep('', 846))
+for(i in 1:length(pol3_list)){
+  ADF_ur = urca::ur.df(stl_chirps.v2.0[[i]], type  = "none", lags = m_order6[i], selectlags = "AIC")
+  df_ur$RD_t1[i] = interp_urdf_FM(ADF_ur)
+}
+
+table(df_ur$RD_t1)
+
+#fit2 %>% autoplot()
+
+deseasoned2 <- y$chirps.v2.0 - fit2$season_year
+deseasoned21 <- y$chirps.v2.0 - fit21$season_year
+deseasoned22 <- y$chirps.v2.0 - fit22$season_year
+
+cbind(deseasoned, deseasoned2)
+
+plot.ts(deseasoned,
+        cex.main = 0.85)
+lines(deseasoned, col = 'red')
+
+#set.seed(11102024)
+#ts_sample = sample(1:length(pol2_list), 10, replace = FALSE)
+#pol2_sample = pol2_list[ts_sample]
+#saveRDS(pol2_sample, 'Muestra_CHIRPS.RDS')
+
+
+# Calculas medidas de desempeño ----
 # r pearson ----
 R_pearson = c()
 for(i in 1:length(pol2_list)){
   R_pearson[i] = cor(pol2_list[[i]]$chirps.v2.0, pol2_list[[i]]$sttns, use = "complete.obs")
 }
 
+R_Spearman = c()
+for(i in 1:length(pol3_list)){
+  R_Spearman[i] = cor(pol3_list[[i]]$chirps.v2.0, pol3_list[[i]]$sttns, use = "complete.obs", method = "spearman")
+}
+
+quantile(R_Spearman)
+mean(R_Spearman) # 0.785275 # 0.619
+
 quantile(R_pearson)
-mean(R_pearson) # 0.619
+mean(R_pearson) # 0.785275 # 0.619
+
+
 # indica que en promedio es una correlación aceptable 0.6 < r < 0.75
 hist(R_pearson)
 
@@ -278,7 +730,7 @@ mean(NSE_) # 0.33
 hist(NSE_)
 
 # Check point 2 ----
-save.image('df_eval_metrics.RData')
+#save.image('df_eval_metrics_ADF.RData')
 load('df_eval_metrics.RData')
 
 ########################################################
