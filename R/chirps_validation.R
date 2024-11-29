@@ -323,6 +323,7 @@ table(df_ur$RD_t1)
 
 # diff estacional ----
 # Periodograma
+len_ = length(pol3_list)
 df_periodograma = data.frame(freq = rep(0, len_),
                              period = rep(0, len_))
 
@@ -432,18 +433,13 @@ y = y %>% mutate(Date = yearmonth(Date)) %>%
 
 # descomposición STL usando librería base ----
 # t.window = 21 (fpp3) auto
-nextodd <- function(x) {
-  x <- round(x)
-  if (x%%2 == 0) 
-    x <- x + 1
-  as.integer(x)}
+#nextodd <- function(x) {
+#  x <- round(x)
+#  if (x%%2 == 0) 
+#    x <- x + 1
+#  as.integer(x)}
 
-nextodd(ceiling(1.5 * frequency(y)/(1 - 1.5/(10 * as.integer(length(y)) + 1))))
-fit1 <- stl(y, s.window = "periodic")
-# t.window = 13 (fpp2)
-fit11<- stl(y, t.window = 13, s.window = "periodic")
-# Selecting a shorter trend window, avoid produces a trend-cycle component that is too rigid
-fit12<- stl(y, t.window = 7, s.window = "periodic")
+#nextodd(ceiling(1.5 * frequency(y)/(1 - 1.5/(10 * as.integer(length(y)) + 1))))
 
 stl_chirps.v2.0 = list()
 for(i in 1:length(pol3_list)){
@@ -452,15 +448,17 @@ for(i in 1:length(pol3_list)){
   
   y = y %>% mutate(Date = yearmonth(Date)) %>% 
     as_tsibble(index = Date)
+  # t.window = 21 (fpp3) auto
+  #nextodd(ceiling(1.5 * frequency(y)/(1 - 1.5/(10 * as.integer(length(y)) + 1))))
   fit1 <- stl(y, s.window = "periodic")
+  # t.window = 13 (fpp2)
   #fit11<- stl(y, t.window = 13, s.window = "periodic")
+  # Selecting a shorter trend window, avoid produces a trend-cycle component that is too rigid
   #fit12<- stl(y, t.window = 7, s.window = "periodic")
   stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit1$time.series[, "seasonal"]
   #stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit11$time.series[, "seasonal"]
   #stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit12$time.series[, "seasonal"]
 }
-
-plot(stl_chirps.v2.0[[s]])
 
 m_order5 = c()
 k = 1
@@ -468,8 +466,8 @@ for(i in 1:length(pol3_list)){
   m_order5[k] <- tryCatch(
     {
       # Intenta ajustar el modelo AR
-      #ar_obj <- ar(diff(stl_chirps.v2.0[[i]]), method = 'mle')
-      ar_obj <- ar(stl_chirps.v2.0[[i]], method = 'mle')
+      ar_obj <- ar(diff(stl_chirps.v2.0[[i]]), method = 'mle')
+      #ar_obj <- ar(stl_chirps.v2.0[[i]], method = 'mle')
       ar_obj$order  # Devuelve el orden del modelo ajustado
     },
     error = function(e) {
@@ -482,7 +480,7 @@ for(i in 1:length(pol3_list)){
 }
 
 table(m_order5)
-m_order5 = ifelse(m_order5==0,12, m_order5)
+m_order5 = ifelse(m_order5==-1,12, m_order5)
 
 ## prueba ADF librería aTSA ----
 len_ = length(pol3_list)
@@ -518,31 +516,7 @@ for(i in 1:length(pol3_list)){
 table(df_ur$RD_t1)
 
 # descomposición STL usando librería feast ----
-# The default setting for monthly data is trend(window=21)
-fit2 = y |>
-  model(
-    STL(`chirps.v2.0` ~ 
-          season(window = "periodic"),
-        robust = TRUE)) |>
-  components() 
-
-# t.window = 13 (fpp2)
-fit21 = y |>
-  model(
-    STL(`chirps.v2.0` ~ trend(window = 13) + 
-          season(window = "periodic"),
-        robust = TRUE)) |>
-  components() 
-
-# Selecting a shorter trend window, avoid produces a trend-cycle component that is too rigid
-fit22 = y |>
-  model(
-    STL(`chirps.v2.0` ~ trend(window = 7) + 
-          season(window = "periodic"),
-        robust = TRUE)) |>
-  components() 
-
-stl_chirps.v2.0 = list()
+f_stl_chirps.v2.0 = list()
 for(i in 1:length(pol3_list)){
   y <- tsibble::tsibble(pol3_list[[i]] %>% mutate(Date = as.Date(str_c(Date, '.01'), format = '%Y.%m.%d')) 
                         %>%  select(c("Date" ,  "chirps.v2.0")), index = Date)
@@ -550,6 +524,9 @@ for(i in 1:length(pol3_list)){
   y = y %>% mutate(Date = yearmonth(Date)) %>% 
     as_tsibble(index = Date)
   
+  # The default setting for monthly data is trend(window=21)
+  # t.window = 13 (fpp2)
+  # Selecting a shorter trend window, avoid produces a trend-cycle component that is too rigid
   fit2 = y |>
     model(
       #STL(`chirps.v2.0` ~ trend(window = 13) +
@@ -557,11 +534,27 @@ for(i in 1:length(pol3_list)){
             season(window = "periodic"),
           robust = TRUE)) |>
     components() 
-  stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit2$season_year
+  f_stl_chirps.v2.0[[i]] = y$chirps.v2.0 - fit2$season_year
 }
 
-head(y$chirps.v2.0 - fit2$season_year)
-head(fit2$season_adjust)
+set.seed(24112024)
+s = sample(1:length(pol3_list), size = 1)
+
+min_length <- min(length(stl_chirps.v2.0[[s]]), length(d_chirps.v2.0[[s]]))
+s1_adj <- window(stl_chirps.v2.0[[s]], end = time(stl_chirps.v2.0[[s]])[min_length])
+y_adj = window(pol3_list[[s]]$chirps.v2.0, end = time(pol3_list[[s]]$chirps.v2.0)[min_length])
+s2_adj <- d_chirps.v2.0[[s]]
+s3_adj <- window(f_stl_chirps.v2.0[[s]], end = time(f_stl_chirps.v2.0[[s]])[min_length])
+
+plot(s2_adj, type = "l", col = "red", lwd = 2, lty = 2, xlab = "Index", ylim  = c(-200,700))
+lines(1:length(s2_adj), s1_adj, type = "l", col = "blue", lwd = 2, lty =2)
+lines(1:length(s2_adj), y_adj, type = "l", col = "black", lwd = 2)
+lines(1:length(s2_adj), s3_adj, type = "l", col = "gray", lwd = 2, lty =2)
+
+legend("topleft", legend = c("serie original CHIRPS", "sin comp. estacional - stats::stl", 
+                             "sin comp. estacional - feast::STL", "dif estacional"), 
+       col = c("black", "blue", "gray", "red"), lwd = 2, lty = c(1,2,2,2), bty = "n")
+
 
 m_order6 = c()
 k = 1
@@ -569,8 +562,8 @@ for(i in 1:length(pol3_list)){
   m_order6[k] <- tryCatch(
     {
       # Intenta ajustar el modelo AR
-      ar_obj <- ar(diff(stl_chirps.v2.0[[i]]), method = 'mle')
-      #ar_obj <- ar(stl_chirps.v2.0[[i]], method = 'mle')
+      ar_obj <- ar(diff(f_stl_chirps.v2.0[[i]]), method = 'mle')
+      #ar_obj <- ar(f_stl_chirps.v2.0[[i]], method = 'mle')
       ar_obj$order  # Devuelve el orden del modelo ajustado
     },
     error = function(e) {
@@ -593,7 +586,7 @@ df_ADF4 = data.frame(lag_t1 = rep(0, len_), p.value_t1 = rep(0, len_),
 
 k = 1
 for(i in 1:length(pol3_list)){
-  l_ADF = aTSA::adf.test(stl_chirps.v2.0[[i]], nlag = m_order6[i], output = FALSE)
+  l_ADF = aTSA::adf.test(f_stl_chirps.v2.0[[i]], nlag = m_order6[i], output = FALSE)
   df_ADF4$lag_t1[k] = which(l_ADF$type1[,'p.value']==max(l_ADF$type1[,'p.value']))
   df_ADF4$p.value_t1[k] = max(l_ADF$type1[,'p.value'])
   df_ADF4$lag_t2[k] = which(l_ADF$type2[,'p.value']==max(l_ADF$type2[,'p.value']))
@@ -645,8 +638,46 @@ for(i in 1:length(pol2_list)){
 
 R_Spearman = c()
 for(i in 1:length(pol3_list)){
-  R_Spearman[i] = cor(pol3_list[[i]]$chirps.v2.0, pol3_list[[i]]$sttns, use = "complete.obs", method = "spearman")
+  R_Spearman[i] = cor(pol3_list[[i]]$chirps.v2.0, pol3_list[[i]]$sttns, 
+                      use = "complete.obs", method = "spearman")
 }
+
+d_sttns = list()
+for(i in 1:length(pol3_list)){
+  d_sttns[[i]] = diff(pol3_list[[i]]$sttns, 
+                      lag = round(df_periodograma$period[i]))
+}
+
+d_R_Spearman = c()
+for(i in 1:length(pol3_list)){
+  d_R_Spearman[i] = cor(d_chirps.v2.0[[i]], d_sttns[[i]], 
+                      use = "complete.obs", method = "spearman")
+}
+
+df_Spearman = data.frame(r_s = c(R_Spearman, d_R_Spearman),
+                         serie = rep(c("original", "dif estacional"), each = length(R_Spearman)))
+
+df_stats <- df_Spearman %>%
+  group_by(serie) %>%
+  summarise(
+    Q1 = quantile(r_s, 0.25),
+    Q2 = median(r_s),
+    Q3 = quantile(r_s, 0.75)
+  )
+
+ggplot(df_Spearman, aes(x = serie, y = r_s, fill = serie)) +
+  geom_boxplot() +
+  geom_text(data = df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  labs(title = "Boxplots del coef de Spearman", y = expression(r[s])) +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14) ) 
+
 
 quantile(R_Spearman)
 mean(R_Spearman) # 0.785275 # 0.619
@@ -668,9 +699,45 @@ f_MAE = function(df){
 }
 
 MAE_ = c()
-for(i in 1:length(pol2_list)){
-  MAE_[i] = f_MAE(pol2_list[[i]])
+for(i in 1:length(pol3_list)){
+  MAE_[i] = f_MAE(pol3_list[[i]])
 }
+
+df_list = list()
+for(i in 1:length(d_chirps.v2.0)){
+  df_list[[i]] = data.frame('chirps.v2.0' = d_chirps.v2.0[[i]],
+                            'sttns' =  d_sttns[[i]]) 
+}
+  
+d_MAE_ = c()
+for(i in 1:length(pol3_list)){
+  d_MAE_[i] = f_MAE(df_list[[i]])
+}
+
+df_MAE_ = data.frame(MAE = c(MAE_, d_MAE_),
+                     serie = rep(c("original", "dif estacional"), each = length(MAE_)))
+
+df_stats <- df_MAE_ %>%
+  group_by(serie) %>%
+  summarise(
+    Q1 = quantile(MAE, 0.25),
+    Q2 = median(MAE),
+    Q3 = quantile(MAE, 0.75)
+  )
+
+ggplot(df_MAE_, aes(x = serie, y = MAE, fill = serie)) +
+  geom_boxplot() +
+  geom_text(data = df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  labs(title = "Boxplots del MAE", y = expression(r[s])) +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14) ) 
+
 
 quantile(MAE_)
 mean(MAE_) # 69.07
@@ -718,9 +785,39 @@ f_NSE = function(df){
 }
 
 NSE_ = c()
-for(i in 1:length(pol2_list)){
-  NSE_[i] = f_NSE(pol2_list[[i]])
+for(i in 1:length(pol3_list)){
+  NSE_[i] = f_NSE(pol3_list[[i]])
 }
+
+d_NSE_ = c()
+for(i in 1:length(pol3_list)){
+  d_NSE_[i] = f_NSE(df_list[[i]])
+}
+
+df_NSE_ = data.frame(NSE = c(NSE_, d_NSE_),
+                     serie = rep(c("original", "dif estacional"), each = length(NSE_)))
+
+df_stats <- df_NSE_ %>%
+  group_by(serie) %>%
+  summarise(
+    Q1 = quantile(NSE, 0.25),
+    Q2 = median(NSE),
+    Q3 = quantile(NSE, 0.75)
+  )
+
+ggplot(df_NSE_, aes(x = serie, y = NSE, fill = serie)) +
+  geom_boxplot() +
+  geom_text(data = df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  labs(title = "Boxplots del NSE", y = expression(r[s])) +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14) ) 
+
 
 quantile(NSE_)
 mean(NSE_) # 0.33
