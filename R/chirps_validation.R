@@ -10,6 +10,7 @@ library(ggtext)
 library(tidyverse)
 library(tsibble)
 library(tseries)
+library(viridis)
 
 setwd('TS_climatic/')
 list.files()
@@ -366,6 +367,12 @@ for(i in 1:length(pol3_list)){
                             lag = round(df_periodograma$period[i]))
 }
 
+for(i in 1:length(pol3_list)){
+  pol3_list[[i]]$d_chirps.v2.0 = c(rep(NA, round(df_periodograma$period[i])),
+                                   diff(pol3_list[[i]]$chirps.v2.0, 
+                                        lag = round(df_periodograma$period[i])))
+}
+
 # crear el ciclo for para calcular los ordenes de cada serie CHIRPS diferenciadas estacionalmente
 # !!! dos escenarios sin diferenciar 
 m_order4 = c()
@@ -388,7 +395,7 @@ for(i in 1:length(pol3_list)){
 }
 
 table(m_order4)
-m_order4 = ifelse(m_order3==-1,12, m_order4)
+#m_order4 = ifelse(m_order3==-1,12, m_order4)
 ## prueba ADF librería aTSA ----
 df_ADF2 = data.frame(lag_t1 = rep(0, len_), p.value_t1 = rep(0, len_),
                      lag_t2 = rep(0, len_), p.value_t2 = rep(0, len_),
@@ -631,6 +638,11 @@ lines(deseasoned, col = 'red')
 
 # Calculas medidas de desempeño ----
 # r pearson ----
+for(i in 1:length(pol3_list)){
+  pol3_list[[i]]$mes = format(as.Date(paste0(pol3_list[[1]]$Date, ".01"), format = "%Y.%m.%d"), "%B")
+}
+
+
 R_pearson = c()
 for(i in 1:length(pol2_list)){
   R_pearson[i] = cor(pol2_list[[i]]$chirps.v2.0, pol2_list[[i]]$sttns, use = "complete.obs")
@@ -648,14 +660,99 @@ for(i in 1:length(pol3_list)){
                       lag = round(df_periodograma$period[i]))
 }
 
+for(i in 1:length(pol3_list)){
+  pol3_list[[i]]$d_sttns = c(rep(NA, round(df_periodograma$period[i])),
+                             diff(pol3_list[[i]]$sttns, 
+                                  lag = round(df_periodograma$period[i])))
+}
+
+# Boxplot por mes ----
+R_Spearman = list()
+for(i in 1:length(pol3_list)){
+  meses <- pol3_list[[i]]$mes
+  # Calculamos el coeficiente de correlación de Spearman para cada mes
+  corrs <- sapply(unique(meses), function(m){
+    # Filtramos los datos para el mes 'm'
+    data_mes <- subset(pol3_list[[i]], mes == m)
+    # Calculamos el coeficiente de correlación de Spearman
+    cor_value <- cor(data_mes$d_chirps.v2.0, data_mes$d_sttns, use = "complete.obs", method = "spearman")
+    return(cor_value)
+  })
+  # Almacenamos los resultados en el listado de R_Spearman
+  R_Spearman[[i]] <- corrs
+}
+
+R_Spearman_df <- as.data.frame(R_Spearman)
+R_Spearman_df <- t(R_Spearman_df)
+R_Spearman_df <- as.data.frame(R_Spearman_df)
+colnames(R_Spearman_df) <- unique(pol3_list[[1]]$mes)
+rownames(R_Spearman_df) <- 1:nrow(R_Spearman_df)
+
+R_Spearman_long <- R_Spearman_df %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Mes", 
+               values_to = "Spearman_R")
+
+R_Spearman_long$Mes <- factor(R_Spearman_long$Mes, 
+                              levels = c("enero", "febrero", "marzo", "abril", "mayo", 
+                                         "junio", "julio", "agosto", "septiembre", "octubre", 
+                                         "noviembre", "diciembre"))
+
+ggplot(R_Spearman_long, aes(x = Mes, y = Spearman_R)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  theme_minimal() +
+  labs(title = expression("Boxplot de r"["s"] ~ "por mes"),
+       x = "Mes", 
+       y = expression(r["s"])) #+
+#theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+d_R_pearson = c()
+for(i in 1:length(pol2_list)){
+  d_R_pearson[i] = cor(d_chirps.v2.0[[i]], d_sttns[[i]], use = "complete.obs")
+}
+
 d_R_Spearman = c()
 for(i in 1:length(pol3_list)){
   d_R_Spearman[i] = cor(d_chirps.v2.0[[i]], d_sttns[[i]], 
                       use = "complete.obs", method = "spearman")
 }
 
+df_pearson = data.frame(r = c(R_pearson, d_R_pearson),
+                         serie = rep(c("original", "dif estacional"), each = length(R_pearson)))
+
 df_Spearman = data.frame(r_s = c(R_Spearman, d_R_Spearman),
                          serie = rep(c("original", "dif estacional"), each = length(R_Spearman)))
+
+geometry_ <- lapply(pol3_list, function(df_) unique(df_$geometry.y))
+geometry_ <- do.call(c, geometry_)  # Combina las geometrías en un solo objeto sf
+geometry_ <- st_sfc(geometry_) 
+geometry_ <- geometry_[!st_is_empty(geometry_)]
+geometry_df <- data.frame(geometry = geometry_)
+class(geometry_df$geometry)
+
+# Scatterplot r_s vs altitud ----
+df_Spearman_alt = data.frame(r_s = d_R_Spearman,
+                             altitud = SRTM_30.sttns$SRTM_30_Col1,
+                             geometry = geometry_df$geometry)
+
+ggplot(df_Spearman_alt, aes(x = r_s, y = altitud)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = expression("Diagrama de dispersión r"["s"] ~ "vs altitud "),
+       x = expression(r["s"]),
+       y = "Altitud") +
+  theme_minimal()
+
+dim(pol3_list[[1]])
+
+df_stats_r <- df_pearson %>%
+  group_by(serie) %>%
+  summarise(
+    Q1 = quantile(r, 0.25),
+    Q2 = median(r),
+    Q3 = quantile(r, 0.75)
+  )
 
 df_stats <- df_Spearman %>%
   group_by(serie) %>%
@@ -665,6 +762,21 @@ df_stats <- df_Spearman %>%
     Q3 = quantile(r_s, 0.75)
   )
 
+# Boxplot Corr Pearson ----
+ggplot(df_pearson, aes(x = serie, y = r, fill = serie)) +
+  geom_boxplot() +
+  geom_text(data = df_stats_r, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = df_stats_r, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = df_stats_r, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  labs(title = "Boxplots del coef de Pearson", y = expression(r)) +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14) ) 
+
+# Boxplot Corr Spearman ----
 ggplot(df_Spearman, aes(x = serie, y = r_s, fill = serie)) +
   geom_boxplot() +
   geom_text(data = df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
@@ -677,6 +789,66 @@ ggplot(df_Spearman, aes(x = serie, y = r_s, fill = serie)) +
   theme_minimal() +
   theme(legend.position = "none", axis.text.x = element_text(size = 14),
         axis.text.y = element_text(size = 14) ) 
+
+# Distribución espacial de R_s ----
+shp_depto <- st_read("Departamentos202208_shp/Depto.shp")
+mundocol <- st_read("admin00/admin00_vecinos.shp")
+
+# necesito un df con las columnas: geometry, dpto, Región natural, r_s
+# grafico auxiliar de boxplot de r_s por región natural
+# grafico dispersión R_s vs Altitud (tendencia a mayor altitud)
+# crear variable categorica (DJF/MAM/JJA/SON) a partir de la variable Date 
+
+df_Spearman_g <- st_as_sf(df_Spearman_alt$geometry, wkt = "geometry")
+df_Spearman_g <- st_set_crs(df_Spearman_g, 4326)
+df_Spearman_g <- st_transform(df_Spearman_g, st_crs(shp_depto))
+
+df_Spearman_g <- st_join(df_Spearman_g, shp_depto["DeNombre"])
+df_Spearman_g$ID = 1:nrow(df_Spearman_g)
+df_Spearman_g$DeNombre[df_Spearman_g$ID==2] = "San Andrés Providencia y Santa Catalina"
+df_Spearman_g$DeNombre[df_Spearman_g$ID==38] = "Atlántico"
+df_Spearman_g$DeNombre[df_Spearman_g$ID==91] = "La Guajira"
+df_Spearman_g$DeNombre[df_Spearman_g$ID==191] = "Arauca"
+df_Spearman_g$DeNombre[df_Spearman_g$ID==592] = "Vichada"
+df_Spearman_g$DeNombre[df_Spearman_g$ID==626] = "Putumayo"
+df_Spearman_g$DeNombre[df_Spearman_g$ID==636] = "Putumayo"
+df_Spearman_g$DeNombre[df_Spearman_g$ID==274] = "Huila"
+
+caribe_ = c("Atlántico", "Bolívar", "Cesar", "Córdoba" , "La Guajira", "Magdalena", 
+         "San Andrés Providencia y Santa Catalina", "Sucre")
+pacifica_ = c("Chocó", "Cauca", "Nariño", "Valle del Cauca")
+orinoquia_ = c("Arauca", "Casanare", "Meta", "Vichada")
+amazonia_ = c("Amazonas", "Caquetá", "Guainía", "Guaviare", "Putumayo", "Vaupés")
+andina_ = c("Antioquia", "Boyacá", "Caldas", "Cundinamarca", "Huila", 
+            "Norte de Santander", "Quindío", "Risaralda", "Santander", "Tolima")
+
+df_Spearman_g$Region = ifelse(df_Spearman_g$DeNombre %in% caribe_, "Caribe",
+                              ifelse(df_Spearman_g$DeNombre %in% pacifica_, "Pacífica",
+                                     ifelse(df_Spearman_g$DeNombre %in% orinoquia_, "Orinoquía",
+                                            ifelse(df_Spearman_g$DeNombre %in% amazonia_, "Amazonía",
+                                                   ifelse(df_Spearman_g$DeNombre %in% andina_, "Andina", "")))))
+
+table(df_Spearman_g$Region)
+
+df_Spearman_g$r_s = df_Spearman_alt$r_s
+
+
+# Boxplot por región ----
+ggplot(df_Spearman_g) + 
+  geom_boxplot(aes(x = Region, y = r_s)) +  # Usamos Región como eje X y r_s como eje Y
+  theme_minimal() +  # Estilo de tema minimalista
+  labs(x = "Región", y = expression(r["s"]), title = expression("Boxplot de r"["s"] ~ "por Región natural")) #+  # Etiquetas de los ejes y título
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje X si es necesario
+
+
+ggplot() + 
+  geom_sf(data = shp_depto) +  # Muestra el mapa de los departamentos
+  geom_sf(data = df_Spearman_g, aes(fill = r_s, color = r_s), size = 1) +
+  scale_fill_gradient(low = "red", high = "green", name = "r_s") +# Muestra los puntos con valores de r_s
+  scale_color_gradient(low = "red", high = "green") +
+  theme_minimal() +  # Tema minimalista
+  labs(title = "Distribución espacial de r_s", fill = "Valor de r_s") +  # Título y leyenda
+  theme(legend.position = "right") 
 
 
 quantile(R_Spearman)
@@ -738,6 +910,108 @@ ggplot(df_MAE_, aes(x = serie, y = MAE, fill = serie)) +
   theme(legend.position = "none", axis.text.x = element_text(size = 14),
         axis.text.y = element_text(size = 14) ) 
 
+# Scatterplot MAE vs altitud ----
+df_MAE_alt = data.frame(MAE = d_MAE_,
+                     altitud = SRTM_30.sttns$SRTM_30_Col1,
+                     geometry = geometry_df$geometry)
+
+ggplot(df_MAE_alt, aes(x = MAE, y = altitud)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = "Diagrama de dispersión  MAE vs altitud",
+       x = "MAE",
+       y = "Altitud") +
+  theme_minimal()
+
+# Boxplot por región natural ----
+df_MAE_alt_g <- st_as_sf(df_MAE_alt$geometry, wkt = "geometry")
+df_MAE_alt_g <- st_set_crs(df_MAE_alt_g, 4326)
+df_MAE_alt_g <- st_transform(df_MAE_alt_g, st_crs(shp_depto))
+
+df_MAE_alt_g <- st_join(df_MAE_alt_g, shp_depto["DeNombre"])
+df_MAE_alt_g$ID = 1:nrow(df_MAE_alt_g)
+df_MAE_alt_g$DeNombre[df_MAE_alt_g$ID==2] = "San Andrés Providencia y Santa Catalina"
+df_MAE_alt_g$DeNombre[df_MAE_alt_g$ID==38] = "Atlántico"
+df_MAE_alt_g$DeNombre[df_MAE_alt_g$ID==91] = "La Guajira"
+df_MAE_alt_g$DeNombre[df_MAE_alt_g$ID==191] = "Arauca"
+df_MAE_alt_g$DeNombre[df_MAE_alt_g$ID==592] = "Vichada"
+df_MAE_alt_g$DeNombre[df_MAE_alt_g$ID==626] = "Putumayo"
+df_MAE_alt_g$DeNombre[df_MAE_alt_g$ID==636] = "Putumayo"
+df_MAE_alt_g$DeNombre[df_MAE_alt_g$ID==274] = "Huila"
+
+caribe_ = c("Atlántico", "Bolívar", "Cesar", "Córdoba" , "La Guajira", "Magdalena", 
+            "San Andrés Providencia y Santa Catalina", "Sucre")
+pacifica_ = c("Chocó", "Cauca", "Nariño", "Valle del Cauca")
+orinoquia_ = c("Arauca", "Casanare", "Meta", "Vichada")
+amazonia_ = c("Amazonas", "Caquetá", "Guainía", "Guaviare", "Putumayo", "Vaupés")
+andina_ = c("Antioquia", "Boyacá", "Caldas", "Cundinamarca", "Huila", 
+            "Norte de Santander", "Quindío", "Risaralda", "Santander", "Tolima")
+
+df_MAE_alt_g$Region = ifelse(df_MAE_alt_g$DeNombre %in% caribe_, "Caribe",
+                              ifelse(df_MAE_alt_g$DeNombre %in% pacifica_, "Pacífica",
+                                     ifelse(df_MAE_alt_g$DeNombre %in% orinoquia_, "Orinoquía",
+                                            ifelse(df_MAE_alt_g$DeNombre %in% amazonia_, "Amazonía",
+                                                   ifelse(df_MAE_alt_g$DeNombre %in% andina_, "Andina", "")))))
+
+table(df_MAE_alt_g$Region)
+
+df_MAE_alt_g$MAE = df_MAE_alt$MAE
+
+ggplot(df_MAE_alt_g) + 
+  geom_boxplot(aes(x = Region, y = MAE)) +  # Usamos Región como eje X y r_s como eje Y
+  theme_minimal() +  # Estilo de tema minimalista
+  labs(x = "Región", y = "MAE", title = "Boxplot de MAE por Región natural") #+  # Etiquetas de los ejes y título
+#theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje X si es necesario
+
+
+ggplot() + 
+  geom_sf(data = shp_depto) +  # Muestra el mapa de los departamentos
+  geom_sf(data = df_MAE_alt_g, aes(fill = MAE, color = MAE), size = 1) +
+  scale_fill_gradient(low = "green", high = "red", name = "MAE") +# Muestra los puntos con valores de r_s
+  scale_color_gradient(low = "green", high = "red") +
+  theme_minimal() +  # Tema minimalista
+  labs(title = "Distribución espacial de MAE", fill = "Valor de MAE") +  # Título y leyenda
+  theme(legend.position = "right") 
+
+# Boxplot por mes ----
+d_MAE_ = list()
+for(i in 1:length(pol3_list)){
+  meses <- pol3_list[[i]]$mes
+  # Calculamos el coeficiente de correlación de Spearman para cada mes
+  MAE <- sapply(unique(meses), function(m){
+    # Filtramos los datos para el mes 'm'
+    data_mes <- subset(pol3_list[[i]], mes == m)
+    # Calculamos el coeficiente de correlación de Spearman
+    MAE_value <- f_MAE(pol3_list[[i]])
+    return(MAE_value)
+  })
+  # Almacenamos los resultados en el listado de R_Spearman
+  d_MAE_[[i]] <- MAE
+}
+
+d_MAE_df <- as.data.frame(d_MAE_)
+d_MAE_df <- t(d_MAE_df)
+d_MAE_df <- as.data.frame(d_MAE_df)
+colnames(d_MAE_df) <- unique(pol3_list[[1]]$mes)
+rownames(d_MAE_df) <- 1:nrow(d_MAE_df)
+
+d_MAE_long <- d_MAE_df %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Mes", 
+               values_to = "MAE")
+
+d_MAE_long$Mes <- factor(d_MAE_long$Mes, 
+                              levels = c("enero", "febrero", "marzo", "abril", "mayo", 
+                                         "junio", "julio", "agosto", "septiembre", "octubre", 
+                                         "noviembre", "diciembre"))
+
+ggplot(d_MAE_long, aes(x = Mes, y = MAE)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  theme_minimal() +
+  labs(title = expression("Boxplot de  MAE por mes"),
+       x = "Mes", 
+       y = "MAE") #+
+#theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 quantile(MAE_)
 mean(MAE_) # 69.07
