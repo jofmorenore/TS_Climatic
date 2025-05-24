@@ -11,6 +11,9 @@ library(tidyverse)
 library(tsibble)
 library(tseries)
 library(viridis)
+library(nortest)
+library(car)
+library(lmtest)
 
 setwd('TS_climatic/')
 list.files()
@@ -639,9 +642,20 @@ lines(deseasoned, col = 'red')
 # Calculas medidas de desempeño ----
 # r pearson ----
 for(i in 1:length(pol3_list)){
-  pol3_list[[i]]$mes = format(as.Date(paste0(pol3_list[[1]]$Date, ".01"), format = "%Y.%m.%d"), "%B")
+  pol3_list[[i]]$mes = format(as.Date(paste0(pol3_list[[i]]$Date, ".01"), format = "%Y.%m.%d"), "%B")
 }
 
+# crear variable categorica (DJF/MAM/JJA/SON) a partir de la variable mes 
+DJF_ = c("diciembre", "enero", "febrero" )
+MAM_ = c("marzo", "abril", "mayo")
+JJA_ = c("junio", "julio", "agosto")
+SON_ = c("septiembre", "octubre", "noviembre")
+for(i in 1:length(pol3_list)){
+  pol3_list[[i]]$cat_mes = ifelse(pol3_list[[i]]$mes %in% DJF_, 
+                                  'DJF', ifelse(pol3_list[[i]]$mes %in% MAM_,
+                                                'MAM', ifelse(pol3_list[[i]]$mes %in% JJA_,
+                                                              'JJA', ifelse(pol3_list[[i]]$mes %in% SON_, 'SON', NA))))
+}
 
 R_pearson = c()
 for(i in 1:length(pol2_list)){
@@ -667,11 +681,11 @@ for(i in 1:length(pol3_list)){
 }
 
 # Boxplot por mes ----
-R_Spearman = list()
+R_Spearman_mes = list()
 for(i in 1:length(pol3_list)){
-  meses <- pol3_list[[i]]$mes
+  meses <- unique(pol3_list[[i]]$mes)
   # Calculamos el coeficiente de correlación de Spearman para cada mes
-  corrs <- sapply(unique(meses), function(m){
+  corrs <- sapply(meses, function(m){
     # Filtramos los datos para el mes 'm'
     data_mes <- subset(pol3_list[[i]], mes == m)
     # Calculamos el coeficiente de correlación de Spearman
@@ -679,10 +693,10 @@ for(i in 1:length(pol3_list)){
     return(cor_value)
   })
   # Almacenamos los resultados en el listado de R_Spearman
-  R_Spearman[[i]] <- corrs
+  R_Spearman_mes[[i]] <- corrs
 }
 
-R_Spearman_df <- as.data.frame(R_Spearman)
+R_Spearman_df <- as.data.frame(R_Spearman_mes)
 R_Spearman_df <- t(R_Spearman_df)
 R_Spearman_df <- as.data.frame(R_Spearman_df)
 colnames(R_Spearman_df) <- unique(pol3_list[[1]]$mes)
@@ -706,6 +720,89 @@ ggplot(R_Spearman_long, aes(x = Mes, y = Spearman_R)) +
        y = expression(r["s"])) #+
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
+# Boxplot por cat_mes (DJF, MAM, JJA, SON) ----
+R_Spearman_mes = list()
+for(i in 1:length(pol3_list)){
+  meses <- unique(pol3_list[[i]]$cat_mes)
+  # Calculamos el coeficiente de correlación de Spearman para cada mes
+  corrs <- sapply(meses, function(m){
+    # Filtramos los datos para el mes 'm'
+    data_mes <- subset(pol3_list[[i]], cat_mes == m)
+    # Calculamos el coeficiente de correlación de Spearman
+    cor_value <- cor(data_mes$d_chirps.v2.0, data_mes$d_sttns, use = "complete.obs", method = "spearman")
+    return(cor_value)
+  })
+  # Almacenamos los resultados en el listado de R_Spearman
+  R_Spearman_mes[[i]] <- corrs
+}
+
+R_Spearman_df <- as.data.frame(R_Spearman_mes)
+R_Spearman_df <- t(R_Spearman_df)
+R_Spearman_df <- as.data.frame(R_Spearman_df)
+colnames(R_Spearman_df) <- unique(pol3_list[[1]]$cat_mes)
+rownames(R_Spearman_df) <- 1:nrow(R_Spearman_df)
+
+R_Spearman_long <- R_Spearman_df %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Cat_mes", 
+               values_to = "Spearman_R")
+
+R_Spearman_long$Cat_mes <- factor(R_Spearman_long$Cat_mes, 
+                                  levels = c("DJF", "MAM", "JJA", "SON"))
+
+# ANOVA por grupo de meses ----
+modelo <- aov(Spearman_R ~ Cat_mes, data = R_Spearman_long)
+modelo_ = summary(modelo)
+p_value = modelo_[[1]]$`Pr(>F)`[1]
+print(ifelse(p_value <= 0.05, "R. H0, concluye dif significativas entre al menos dos grupos",
+             "NO R. H0, concluye no hay dif significativas"))
+
+tukey <- TukeyHSD(modelo)
+#par(mar = c(5, 10, 4, 2)) 
+plot(tukey, las =1)
+
+# validación de supuestos
+## Normalidad
+plot(density(modelo$residuals))
+qqnorm(modelo$residuals)
+qqline(modelo$residuals, col = "red")
+
+lillie.test(modelo$residuals)
+shapiro.test(modelo$residuals)
+
+## Homocedasticidad
+leveneTest(Spearman_R ~ Cat_mes, data = R_Spearman_long)
+bptest(modelo)
+
+## Autocorrelación
+dwtest(modelo)
+
+# Calcular los valores atípicos por mes
+outliers_df <- R_Spearman_long %>%
+  group_by(Cat_mes) %>%
+  summarise(
+    Q1 = quantile(Spearman_R, 0.25, na.rm = TRUE),
+    Q3 = quantile(Spearman_R, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    lower_bound = Q1 - 1.5 * IQR,
+    upper_bound = Q3 + 1.5 * IQR,
+    outlier_count = sum(Spearman_R < lower_bound | Spearman_R > upper_bound, na.rm = TRUE),
+    total_count = n(),
+    outlier_pct = round((outlier_count / total_count) * 100, 1) # Porcentaje de atípicos
+  )
+
+# Unir el dataframe con los datos originales para graficar
+R_Spearman_long <- left_join(R_Spearman_long, outliers_df, by = "Cat_mes")
+
+ggplot(R_Spearman_long, aes(x = Cat_mes, y = Spearman_R)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  #geom_hline(yintercept = 0.68, linetype = "dashed", color = "red", size = 1) +
+  geom_text(aes(label = paste0(outlier_pct, "% \n outliers"), y = min(Spearman_R, na.rm = TRUE) + 0.05), 
+            size = 3, color = "black", fontface = "bold") +
+  theme_minimal() +
+  labs(title = expression("Boxplot de r"["s"] ~ "por grupo de meses"),
+       x = "Meses", 
+       y = expression(r["s"])) 
 
 d_R_pearson = c()
 for(i in 1:length(pol2_list)){
@@ -718,8 +815,83 @@ for(i in 1:length(pol3_list)){
                       use = "complete.obs", method = "spearman")
 }
 
+# test de significancia coef corr spearman ----
+
+test_d_R_Spearman = c()
+for(i in 1:length(pol3_list)){
+  obj_ = cor.test(d_chirps.v2.0[[i]], d_sttns[[i]], 
+                             method = "spearman", exact = FALSE)
+  test_d_R_Spearman[i] = obj_$p.value
+}
+
+# todos significativos a un nivel de confianza del 95%
+summary(test_d_R_Spearman)
+
+
+length(test_d_R_Spearman[test_d_R_Spearman>=0.05])
+which(test_d_R_Spearman>=0.01)
+# dos valores de rho (0.10 y 0.11) con p-value 0.02 y 0.01
+d_R_Spearman[which(test_d_R_Spearman>=0.01)] # valor de rho
+test_d_R_Spearman[which(test_d_R_Spearman>=0.01)] # valor de los p-value
+
+df_test = data.frame(test = test_d_R_Spearman, dif_est =  d_R_Spearman)
+table(df_test$test==df_test$dif_est)
+
+# Coef de corr spearman cruzado ----
+ccf_spearman <- function(x, y, max_lag = 10) {
+  #x_rank <- rank(x)
+  #y_rank <- rank(y)
+  x_rank <- x
+  y_rank <- y
+  
+  lags <- seq(-max_lag, max_lag)
+  cor_values <- sapply(lags, function(lag) {
+    if (lag < 0) {
+      cor(x_rank[1:(length(x) + lag)],y_rank[(1 - lag):length(y)], 
+          method = "spearman", use = "complete.obs")
+    } else if (lag > 0) {
+      cor(x_rank[(1 + lag):length(x)], y_rank[1:(length(y) - lag)], 
+          method = "spearman", use = "complete.obs")
+    } else {
+      cor(x_rank, y_rank, method = "spearman", use = "complete.obs")
+    }
+  })
+  df_cor <- as.data.frame(t(cor_values))
+  colnames(df_cor) <- paste0("Lag_", lags)
+  
+  return(df_cor)
+}
+
+d_ccf_R_Spearman = list()
+for(i in 1:length(pol3_list)){
+  d_ccf_R_Spearman[[i]] = ccf_spearman(d_chirps.v2.0[[i]], d_sttns[[i]], max_lag = 12)
+}
+
+df_d_ccf_R_Spearman = d_ccf_R_Spearman %>% bind_rows()
+#df_d_ccf_R_Spearman = df_d_ccf_R_Spearman %>% bind_cols(R_s = d_R_Spearman)
+#table(df_d_ccf_R_Spearman$Lag_0 == df_d_ccf_R_Spearman$R_s)
+
+# Pivotear el data frame a formato largo
+df_d_ccf_R_Spearman <- df_d_ccf_R_Spearman %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Lag", 
+               values_to = "Spearman_Correlation")
+
+df_d_ccf_R_Spearman =df_d_ccf_R_Spearman %>% 
+  mutate(Lag = factor(Lag, levels = paste0("Lag_", -12:12)))
+
+# Crear el gráfico de boxplot ccf R Spearman ----
+ggplot(df_d_ccf_R_Spearman, aes(x = Lag, y = Spearman_Correlation)) +
+  geom_boxplot(fill = "lightblue", color = "black") + 
+  theme_minimal() +
+  labs(title = "Distribución de la Correlación de Spearman por Lag",
+       x = "Lag",
+       y = "Coeficiente de Spearman") +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))  # Rotar etiquetas en eje X
+
+# Scatterplot r_s vs altitud ----
 df_pearson = data.frame(r = c(R_pearson, d_R_pearson),
-                         serie = rep(c("original", "dif estacional"), each = length(R_pearson)))
+                        serie = rep(c("original", "dif estacional"), each = length(R_pearson)))
 
 df_Spearman = data.frame(r_s = c(R_Spearman, d_R_Spearman),
                          serie = rep(c("original", "dif estacional"), each = length(R_Spearman)))
@@ -731,11 +903,13 @@ geometry_ <- geometry_[!st_is_empty(geometry_)]
 geometry_df <- data.frame(geometry = geometry_)
 class(geometry_df$geometry)
 
-# Scatterplot r_s vs altitud ----
+# se requiere traer las columnas región, mes y cat_mes
+# cómo se traen las regiones más arriba?
 df_Spearman_alt = data.frame(r_s = d_R_Spearman,
                              altitud = SRTM_30.sttns$SRTM_30_Col1,
                              geometry = geometry_df$geometry)
 
+# scatterplot v1
 ggplot(df_Spearman_alt, aes(x = r_s, y = altitud)) +
   geom_point(color = "blue", size = 3) +
   geom_smooth(method = "lm", color = "red", se = TRUE) +
@@ -797,7 +971,6 @@ mundocol <- st_read("admin00/admin00_vecinos.shp")
 # necesito un df con las columnas: geometry, dpto, Región natural, r_s
 # grafico auxiliar de boxplot de r_s por región natural
 # grafico dispersión R_s vs Altitud (tendencia a mayor altitud)
-# crear variable categorica (DJF/MAM/JJA/SON) a partir de la variable Date 
 
 df_Spearman_g <- st_as_sf(df_Spearman_alt$geometry, wkt = "geometry")
 df_Spearman_g <- st_set_crs(df_Spearman_g, 4326)
@@ -828,10 +1001,88 @@ df_Spearman_g$Region = ifelse(df_Spearman_g$DeNombre %in% caribe_, "Caribe",
                                             ifelse(df_Spearman_g$DeNombre %in% amazonia_, "Amazonía",
                                                    ifelse(df_Spearman_g$DeNombre %in% andina_, "Andina", "")))))
 
+df_Spearman_g$Region2 = ifelse(df_Spearman_g$DeNombre %in% caribe_, "CAR",
+                              ifelse(df_Spearman_g$DeNombre %in% pacifica_, "PAC",
+                                     ifelse(df_Spearman_g$DeNombre %in% orinoquia_, "ORN",
+                                            ifelse(df_Spearman_g$DeNombre %in% amazonia_, "AMZ",
+                                                   ifelse(df_Spearman_g$DeNombre %in% andina_, "AND", "")))))
+
 table(df_Spearman_g$Region)
 
 df_Spearman_g$r_s = df_Spearman_alt$r_s
+df_Spearman_g$altitud = df_Spearman_alt$altitud
 
+# panel de scatterplot para cada categoria de región
+ggplot(df_Spearman_g, aes(x = r_s, y = altitud)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = expression("Diagrama de dispersión r"["s"] ~ "vs altitud por región"),
+       x = expression(r["s"]),
+       y = "Altitud") +
+  theme_minimal()+
+  facet_wrap(~ Region, scales = "free")
+
+# panel de scatterplot para cada categoria de mes
+df_Spearman_g2 = df_Spearman_g %>% bind_cols(R_Spearman_df)
+
+R_Spearman_long <- df_Spearman_g2 %>%
+  pivot_longer(#cols = enero:diciembre,
+               cols = c('DJF', 'MAM', 'JJA', 'SON'),
+               #names_to = "Mes", 
+               names_to = "Cat_mes", 
+               values_to = "Spearman_R") %>%
+  #select(ID, altitud, Mes, Spearman_R)
+  select(ID, altitud, Cat_mes, Spearman_R) 
+
+#R_Spearman_long$Mes <- factor(R_Spearman_long$Mes, 
+#                              levels = c("enero", "febrero", "marzo", "abril", "mayo", 
+#                                         "junio", "julio", "agosto", "septiembre", "octubre", 
+#                                         "noviembre", "diciembre"))
+
+R_Spearman_long$Cat_mes <- factor(R_Spearman_long$Cat_mes, 
+                                  levels = c("DJF", "MAM", "JJA", "SON"))
+
+ggplot(R_Spearman_long, aes(x = Spearman_R, y = altitud)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  #labs(title = expression("Diagrama de dispersión r"["s"] ~ "vs altitud por mes"),
+  labs(title = expression("Diagrama de dispersión r"["s"] ~ "vs altitud por grupo de meses"),
+       x = expression(r["s"]),
+       y = "Altitud") +
+  theme_minimal()+
+  facet_wrap(~ Cat_mes, scales = "free")
+  #facet_wrap(~ Mes, scales = "free")
+
+# ANOVA no paramétrico ----
+kruskal_test <- kruskal.test(r_s ~ Region, data = df_Spearman_g)
+print(kruskal_test)
+
+# ANOVA por Region ----
+modelo <- aov(r_s ~ Region, data = df_Spearman_g)
+modelo_ = summary(modelo)
+p_value = modelo_[[1]]$`Pr(>F)`[1]
+print(ifelse(p_value <= 0.05, "R. H0, concluye dif significativas entre al menos dos grupos",
+             "NO R. H0, concluye no hay dif significativas"))
+
+tukey <- TukeyHSD(modelo)
+#par(mar = c(5, 10, 4, 2)) 
+plot(tukey, las =1)
+
+# validación de supuestos
+## Normalidad
+plot(density(modelo$residuals))
+qqnorm(modelo$residuals)
+qqline(modelo$residuals, col = "red")
+
+lillie.test(modelo$residuals)
+shapiro.test(modelo$residuals)
+
+## Homocedasticidad
+leveneTest(r_s ~ Region, data = df_Spearman_g)
+bptest(modelo)
+
+## Autocorrelación
+dwtest(modelo)
 
 # Boxplot por región ----
 ggplot(df_Spearman_g) + 
@@ -839,7 +1090,6 @@ ggplot(df_Spearman_g) +
   theme_minimal() +  # Estilo de tema minimalista
   labs(x = "Región", y = expression(r["s"]), title = expression("Boxplot de r"["s"] ~ "por Región natural")) #+  # Etiquetas de los ejes y título
   #theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje X si es necesario
-
 
 ggplot() + 
   geom_sf(data = shp_depto) +  # Muestra el mapa de los departamentos
@@ -850,13 +1100,11 @@ ggplot() +
   labs(title = "Distribución espacial de r_s", fill = "Valor de r_s") +  # Título y leyenda
   theme(legend.position = "right") 
 
-
 quantile(R_Spearman)
 mean(R_Spearman) # 0.785275 # 0.619
 
 quantile(R_pearson)
 mean(R_pearson) # 0.785275 # 0.619
-
 
 # indica que en promedio es una correlación aceptable 0.6 < r < 0.75
 hist(R_pearson)
@@ -956,6 +1204,44 @@ df_MAE_alt_g$Region = ifelse(df_MAE_alt_g$DeNombre %in% caribe_, "Caribe",
 table(df_MAE_alt_g$Region)
 
 df_MAE_alt_g$MAE = df_MAE_alt$MAE
+df_MAE_alt_g$altitud = df_MAE_alt$altitud
+
+# ANOVA por Region ----
+modelo <- aov(MAE ~ Region, data = df_MAE_alt_g)
+modelo_ = summary(modelo)
+p_value = modelo_[[1]]$`Pr(>F)`[1]
+print(ifelse(p_value <= 0.05, "R. H0, concluye dif significativas entre al menos dos grupos",
+             "NO R. H0, concluye no hay dif significativas"))
+
+tukey <- TukeyHSD(modelo)
+#par(mar = c(5, 10, 4, 2)) 
+plot(tukey, las =1)
+
+# validación de supuestos
+## Normalidad
+plot(density(modelo$residuals))
+qqnorm(modelo$residuals)
+qqline(modelo$residuals, col = "red")
+
+lillie.test(modelo$residuals)
+shapiro.test(modelo$residuals)
+
+## Homocedasticidad
+leveneTest(MAE ~ Region, data = df_MAE_alt_g)
+bptest(modelo)
+
+## Autocorrelación
+dwtest(modelo)
+
+# panel de scatterplot para cada categoria de región
+ggplot(df_MAE_alt_g, aes(x = MAE, y = altitud)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = expression("Diagrama de dispersión MAE vs altitud por región"),
+       x = "MAE",
+       y = "Altitud") +
+  theme_minimal()+
+  facet_wrap(~ Region, scales = "free")
 
 ggplot(df_MAE_alt_g) + 
   geom_boxplot(aes(x = Region, y = MAE)) +  # Usamos Región como eje X y r_s como eje Y
@@ -973,16 +1259,21 @@ ggplot() +
   labs(title = "Distribución espacial de MAE", fill = "Valor de MAE") +  # Título y leyenda
   theme(legend.position = "right") 
 
+
+
 # Boxplot por mes ----
 d_MAE_ = list()
 for(i in 1:length(pol3_list)){
-  meses <- pol3_list[[i]]$mes
+  meses <- unique(pol3_list[[i]]$mes)
+  #meses <- unique(pol3_list[[i]]$cat_mes)
   # Calculamos el coeficiente de correlación de Spearman para cada mes
-  MAE <- sapply(unique(meses), function(m){
+  MAE <- sapply(meses, function(m){
     # Filtramos los datos para el mes 'm'
     data_mes <- subset(pol3_list[[i]], mes == m)
+    #data_mes <- subset(pol3_list[[i]], cat_mes == m)
     # Calculamos el coeficiente de correlación de Spearman
-    MAE_value <- f_MAE(pol3_list[[i]])
+    MAE_value <- f_MAE(data_mes)
+    #MAE_value <- f_MAE(pol3_list[[i]])
     return(MAE_value)
   })
   # Almacenamos los resultados en el listado de R_Spearman
@@ -993,11 +1284,14 @@ d_MAE_df <- as.data.frame(d_MAE_)
 d_MAE_df <- t(d_MAE_df)
 d_MAE_df <- as.data.frame(d_MAE_df)
 colnames(d_MAE_df) <- unique(pol3_list[[1]]$mes)
+#colnames(d_MAE_df) <- unique(pol3_list[[1]]$cat_mes)
 rownames(d_MAE_df) <- 1:nrow(d_MAE_df)
 
 d_MAE_long <- d_MAE_df %>%
   pivot_longer(cols = everything(), 
+               #cols = c("DJF", "MAM", "JJA", "SON"), 
                names_to = "Mes", 
+               #names_to = "Cat_mes", 
                values_to = "MAE")
 
 d_MAE_long$Mes <- factor(d_MAE_long$Mes, 
@@ -1005,13 +1299,88 @@ d_MAE_long$Mes <- factor(d_MAE_long$Mes,
                                          "junio", "julio", "agosto", "septiembre", "octubre", 
                                          "noviembre", "diciembre"))
 
+d_MAE_long$Cat_mes <- factor(d_MAE_long$Cat_mes, 
+                             levels = c("DJF", "MAM", "JJA", "SON"))
+
 ggplot(d_MAE_long, aes(x = Mes, y = MAE)) +
   geom_boxplot(fill = "lightblue", color = "black") +
   theme_minimal() +
   labs(title = expression("Boxplot de  MAE por mes"),
        x = "Mes", 
        y = "MAE") #+
+
+ggplot(d_MAE_long, aes(x = Cat_mes, y = MAE)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  theme_minimal() +
+  labs(title = expression("Boxplot de MAE por grupo de meses"),
+       x = "Meses", 
+       y = "MAE") #+
+
+
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Calcular los valores atípicos por mes
+outliers_df <- d_MAE_long %>%
+  group_by(Mes) %>%
+  #group_by(Cat_mes) %>%
+  summarise(
+    Q1 = quantile(MAE, 0.25, na.rm = TRUE),
+    Q3 = quantile(MAE, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    lower_bound = Q1 - 1.5 * IQR,
+    upper_bound = Q3 + 1.5 * IQR,
+    outlier_count = sum(MAE < lower_bound | MAE > upper_bound, na.rm = TRUE),
+    total_count = n(),
+    outlier_pct = round((outlier_count / total_count) * 100, 1) # Porcentaje de atípicos
+  )
+
+# Unir el dataframe con los datos originales para graficar
+d_MAE_long2 <- left_join(d_MAE_long, outliers_df, by = "Mes")
+#d_MAE_long2 <- left_join(d_MAE_long, outliers_df, by = "Cat_mes")
+
+ggplot(d_MAE_long2, aes(x = Mes, y = MAE)) +
+#ggplot(d_MAE_long2, aes(x = Cat_mes, y = MAE)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  #geom_hline(yintercept = 0.68, linetype = "dashed", color = "red", size = 1) +
+  geom_text(aes(label = paste0(outlier_pct, "% \n outliers"), y = max(MAE, na.rm = TRUE) + 0.05), 
+            size = 3, color = "black", fontface = "bold") +
+  theme_minimal() +
+  labs(title = expression("Boxplot de MAE por mes"),
+  #labs(title = expression("Boxplot de MAE por grupo de meses"),
+       x = "Meses", 
+       y = "MAE") 
+
+
+# panel de scatterplot para cada categoria de mes
+df_MAE_alt_g2 = df_MAE_alt_g %>% bind_cols(d_MAE_df)
+
+MAE_long <- df_MAE_alt_g2 %>%
+  pivot_longer(cols = enero:diciembre,
+               #cols = c('DJF', 'MAM', 'JJA', 'SON'),
+               names_to = "Mes", 
+               #names_to = "Cat_mes", 
+               values_to = "MAE_") %>%
+  select(ID, altitud, Mes, MAE_)
+  #select(ID, altitud, Cat_mes, MAE_) 
+
+MAE_long$Mes <- factor(MAE_long$Mes, 
+                       levels = c("enero", "febrero", "marzo", "abril", "mayo", 
+                                  "junio", "julio", "agosto", "septiembre", "octubre", 
+                                  "noviembre", "diciembre"))
+
+MAE_long$Cat_mes <- factor(MAE_long$Cat_mes, 
+                           levels = c("DJF", "MAM", "JJA", "SON"))
+
+ggplot(MAE_long, aes(x = MAE_, y = altitud)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = expression("Diagrama de dispersión MAE vs altitud por mes"),
+  #labs(title = expression("Diagrama de dispersión MAE vs altitud por grupo de meses"),
+       x = "MAE",
+       y = "Altitud") +
+  theme_minimal()+
+  facet_wrap(~ Mes, scales = "free")
+  #facet_wrap(~ Cat_mes, scales = "free")
 
 quantile(MAE_)
 mean(MAE_) # 69.07
@@ -1020,7 +1389,191 @@ mean(MAE_) # 69.07
 hist(MAE_)
 
 # PBIAS ----
-pol2_list
+f_PBIAS = function(df){
+  PBIAS = df %>%
+    mutate(error_ = chirps.v2.0 - sttns) %>%
+    summarise(PBIAS = (sum(error_, na.rm = TRUE)/sum(sttns, na.rm = TRUE))*100) %>%
+    pull(PBIAS)
+  return(PBIAS)
+}
+
+PBIAS_ = c()
+for(i in 1:length(pol3_list)){
+  PBIAS_[i] = f_PBIAS(pol3_list[[i]])
+}
+
+df_list = list()
+for(i in 1:length(d_chirps.v2.0)){
+  df_list[[i]] = data.frame('chirps.v2.0' = d_chirps.v2.0[[i]],
+                            'sttns' =  d_sttns[[i]]) 
+}
+
+d_PBIAS_ = c()
+for(i in 1:length(pol3_list)){
+  d_PBIAS_[i] = f_PBIAS(df_list[[i]])
+}
+
+df_PBIAS_ = data.frame(PBIAS = c(PBIAS_, d_PBIAS_),
+                      serie = rep(c("original", "dif estacional"), each = length(PBIAS_)))
+
+df_stats <- df_PBIAS_ %>%
+  group_by(serie) %>%
+  summarise(
+    Q1 = quantile(PBIAS, 0.25),
+    Q2 = median(PBIAS),
+    Q3 = quantile(PBIAS, 0.75)
+  ) %>% mutate(IQR = Q3 - Q1,
+               lim_inf = Q1 - 1.5 * IQR,
+               lim_sup = Q3 + 1.5 * IQR)
+
+ggplot(df_PBIAS_, aes(x = serie, y = PBIAS, fill = serie)) +
+  geom_boxplot() +
+  geom_text(data = df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  labs(title = "Boxplots del PBIAS", y = 'PBIAS') +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14) ) +
+  coord_cartesian(ylim = c(min(df_stats$lim_inf), max(df_stats$lim_sup)))
+
+# Scatterplot MAE vs altitud ----
+df_PBIAS_alt = data.frame(PBIAS = d_PBIAS_,
+                          altitud = SRTM_30.sttns$SRTM_30_Col1,
+                          geometry = geometry_df$geometry)
+
+ggplot(df_PBIAS_alt, aes(x = PBIAS, y = altitud)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = "Diagrama de dispersión  PBIAS vs altitud",
+       x = "PBIAS",
+       y = "Altitud") +
+  theme_minimal()+
+  coord_cartesian(xlim = c(min(df_stats$lim_inf), max(df_stats$lim_sup)))
+
+# Boxplot por región natural ----
+df_PBIAS_alt_g <- st_as_sf(df_PBIAS_alt$geometry, wkt = "geometry")
+df_PBIAS_alt_g <- st_set_crs(df_PBIAS_alt_g, 4326)
+df_PBIAS_alt_g <- st_transform(df_PBIAS_alt_g, st_crs(shp_depto))
+
+df_PBIAS_alt_g <- st_join(df_PBIAS_alt_g, shp_depto["DeNombre"])
+df_PBIAS_alt_g$ID = 1:nrow(df_PBIAS_alt_g)
+df_PBIAS_alt_g$DeNombre[df_PBIAS_alt_g$ID==2] = "San Andrés Providencia y Santa Catalina"
+df_PBIAS_alt_g$DeNombre[df_PBIAS_alt_g$ID==38] = "Atlántico"
+df_PBIAS_alt_g$DeNombre[df_PBIAS_alt_g$ID==91] = "La Guajira"
+df_PBIAS_alt_g$DeNombre[df_PBIAS_alt_g$ID==191] = "Arauca"
+df_PBIAS_alt_g$DeNombre[df_PBIAS_alt_g$ID==592] = "Vichada"
+df_PBIAS_alt_g$DeNombre[df_PBIAS_alt_g$ID==626] = "Putumayo"
+df_PBIAS_alt_g$DeNombre[df_PBIAS_alt_g$ID==636] = "Putumayo"
+df_PBIAS_alt_g$DeNombre[df_PBIAS_alt_g$ID==274] = "Huila"
+
+caribe_ = c("Atlántico", "Bolívar", "Cesar", "Córdoba" , "La Guajira", "Magdalena", 
+            "San Andrés Providencia y Santa Catalina", "Sucre")
+pacifica_ = c("Chocó", "Cauca", "Nariño", "Valle del Cauca")
+orinoquia_ = c("Arauca", "Casanare", "Meta", "Vichada")
+amazonia_ = c("Amazonas", "Caquetá", "Guainía", "Guaviare", "Putumayo", "Vaupés")
+andina_ = c("Antioquia", "Boyacá", "Caldas", "Cundinamarca", "Huila", 
+            "Norte de Santander", "Quindío", "Risaralda", "Santander", "Tolima")
+
+df_PBIAS_alt_g$Region = ifelse(df_PBIAS_alt_g$DeNombre %in% caribe_, "Caribe",
+                             ifelse(df_PBIAS_alt_g$DeNombre %in% pacifica_, "Pacífica",
+                                    ifelse(df_PBIAS_alt_g$DeNombre %in% orinoquia_, "Orinoquía",
+                                           ifelse(df_PBIAS_alt_g$DeNombre %in% amazonia_, "Amazonía",
+                                                  ifelse(df_PBIAS_alt_g$DeNombre %in% andina_, "Andina", "")))))
+
+table(df_PBIAS_alt_g$Region)
+
+df_PBIAS_alt_g$PBIAS = df_PBIAS_alt$PBIAS
+df_PBIAS_alt_g$altitud = df_PBIAS_alt$altitud
+
+# panel de scatterplot para cada categoria de región
+ggplot(df_PBIAS_alt_g, aes(x = PBIAS, y = altitud)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = expression("Diagrama de dispersión PBIAS vs altitud por región"),
+       x = "PBIAS",
+       y = "Altitud") +
+  theme_minimal()+
+  coord_cartesian(xlim = c(min(df_stats$lim_inf), max(df_stats$lim_sup)))+
+  facet_wrap(~ Region, scales = "free")
+
+ggplot(df_PBIAS_alt_g) + 
+  geom_boxplot(aes(x = Region, y = PBIAS)) +  # Usamos Región como eje X y r_s como eje Y
+  theme_minimal() +  # Estilo de tema minimalista
+  labs(x = "Región", y = "PBIAS", title = "Boxplot de PBIAS por Región natural")  +
+  coord_cartesian(ylim = c(min(df_stats$lim_inf), max(df_stats$lim_sup)))#+  # Etiquetas de los ejes y título
+#theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje X si es necesario
+
+
+ggplot() + 
+  geom_sf(data = shp_depto) +  # Muestra el mapa de los departamentos
+  geom_sf(data = df_PBIAS_alt_g %>% filter(PBIAS > min(df_stats$lim_inf) & 
+                                             PBIAS < max(df_stats$lim_sup)), aes(fill = PBIAS, color = PBIAS), size = 1) +
+  scale_fill_gradient(low = "green", high = "red", name = "PBIAS") +# Muestra los puntos con valores de r_s
+  scale_color_gradient(low = "green", high = "red") +
+  theme_minimal() +  # Tema minimalista
+  labs(title = "Distribución espacial de PBIAS", fill = "Valor de PBIAS") +  # Título y leyenda
+  theme(legend.position = "right") 
+
+# Boxplot por mes ----
+d_PBIAS_ = list()
+for(i in 1:length(pol3_list)){
+  meses <- unique(pol3_list[[i]]$mes)
+  #meses <- unique(pol3_list[[i]]$cat_mes)
+  # Calculamos el coeficiente de correlación de Spearman para cada mes
+  PBIAS <- sapply(meses, function(m){
+    # Filtramos los datos para el mes 'm'
+    data_mes <- subset(pol3_list[[i]], mes == m)
+    #data_mes <- subset(pol3_list[[i]], cat_mes == m)
+    # Calculamos el coeficiente de correlación de Spearman
+    PBIAS_value <- f_PBIAS(data_mes)
+    #MAE_value <- f_MAE(pol3_list[[i]])
+    return(PBIAS_value)
+  })
+  # Almacenamos los resultados en el listado de R_Spearman
+  d_PBIAS_[[i]] <- PBIAS
+}
+
+d_PBIAS_df <- as.data.frame(d_PBIAS_)
+d_PBIAS_df <- t(d_PBIAS_df)
+d_PBIAS_df <- as.data.frame(d_PBIAS_df)
+colnames(d_PBIAS_df) <- unique(pol3_list[[1]]$mes)
+#colnames(d_MAE_df) <- unique(pol3_list[[1]]$cat_mes)
+rownames(d_PBIAS_df) <- 1:nrow(d_PBIAS_df)
+
+d_PBIAS_long <- d_PBIAS_df %>%
+  pivot_longer(cols = everything(), 
+               #cols = c("DJF", "MAM", "JJA", "SON"), 
+               names_to = "Mes", 
+               #names_to = "Cat_mes", 
+               values_to = "PBIAS")
+
+d_PBIAS_long$Mes <- factor(d_PBIAS_long$Mes, 
+                         levels = c("enero", "febrero", "marzo", "abril", "mayo", 
+                                    "junio", "julio", "agosto", "septiembre", "octubre", 
+                                    "noviembre", "diciembre"))
+
+d_MAE_long$Cat_mes <- factor(d_MAE_long$Cat_mes, 
+                             levels = c("DJF", "MAM", "JJA", "SON"))
+
+ggplot(d_MAE_long, aes(x = Mes, y = PBIAS)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  theme_minimal() +
+  labs(title = expression("Boxplot de  PBIAS por mes"),
+       x = "Mes", 
+       y = "PBIAS") +
+  coord_cartesian(ylim = c(min(df_stats$lim_inf), max(df_stats$lim_sup))) #+
+
+ggplot(d_MAE_long, aes(x = Cat_mes, y = MAE)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  theme_minimal() +
+  labs(title = expression("Boxplot de MAE por grupo de meses"),
+       x = "Meses", 
+       y = "MAE") #+
+
 
 # R^2 (pretende explicar la variabilidad del modelo) ----
 f_R2 = function(df){
@@ -1102,7 +1655,8 @@ hist(NSE_)
 
 # Check point 2 ----
 #save.image('df_eval_metrics_ADF.RData')
-load('df_eval_metrics.RData')
+load('df_eval_metrics_ADF.RData')
+#load('df_eval_metrics.RData')
 
 ########################################################
 #set.seed(123)
