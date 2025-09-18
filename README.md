@@ -5,3 +5,7 @@ https://www.arcgis.com/apps/mapviewer/index.html?webmap=c32880933f914ddba7d32882
 
 
 https://ars.els-cdn.com/content/image/1-s2.0-S0169809517313029-gr1_lrg.jpg
+
+https://ars.els-cdn.com/content/image/1-s2.0-S1474706522000778-gr1_lrg.jpg
+
+https://ars.els-cdn.com/content/image/1-s2.0-S2090447922000508-gr1_lrg.jpg
