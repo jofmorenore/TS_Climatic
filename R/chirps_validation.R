@@ -51,18 +51,8 @@ sttns.points <- st_as_sf(x = sttns,
 
 #terra::crs(sttns.points)
 print(sttns.points)
-# 4. Extrae la altitud de los puntos de las estaciones ----
-SRTM_30.sttns <- terra::extract(SRTM_30, sttns.points)
-v_ = which(is.na(SRTM_30.sttns$SRTM_30_Col1)) # filas sin elevación
 
-for (i in v_){
-  SRTM_30.sttns$SRTM_30_Col1[i] = terra::extract(geodata::elevation_3s(
-    lon = pcp_col$LONGITUD[i], lat = pcp_col$LATITUD[i], path = './tmpr'), 
-    cbind(pcp_col$LONGITUD[i], pcp_col$LATITUD[i])
-    )[[1]]
-}
-
-# 5. Función para extraer los pixeles chirps más cercanos ----
+# 4. Función para extraer los pixeles chirps más cercanos ----
 #chirps.point#[1]
 
 sttns.points$n_chirps = 1 # (oct/2024)
@@ -158,9 +148,18 @@ v_na = which(n_na!=0)
 ## elimina elementos de la lista que tienen nulos 
 pol_list = pol_list[-v_na]
 
+
 # Check point 1 ----
 save.image('df_pol_chirps_25.RData')
 load('df_pol_chirps_25.RData')
+
+# 5. Extrae la altitud de los puntos de las estaciones ----
+SRTM_30.sttns <- terra::extract(SRTM_30, sttns.points, ID = FALSE)
+
+SRTM_30.sttns =  SRTM_30.sttns %>% 
+  mutate(CodigoEstacion = sttns.points$CodigoEstacion) %>%  
+  filter(!is.na(SRTM_30_Col1)) %>% 
+  rename(SRTM_30 = SRTM_30_Col1)
 
 # 6. join con sttns.points por ID ----
 ## join por ID para traer las cols de sttns (Obs.)
@@ -491,8 +490,9 @@ for(i in 1:len_){
 
 ## 9.3 df_corr: data frame para graficar coef corr ----
 
-df_corr = data.frame(R_pearson = numeric(len_), R_Spearman = numeric(len_), 
-                     d_R_pearson = numeric(len_), d_R_Spearman = numeric(len_))
+ADZ = "Archipielago De San Andres, Providencia Y Santa Catalina"
+df_corr = data.frame(CodigoEstacion = 
+                       sttns.points$CodigoEstacion[!sttns.points$DEPARTAMENTO %in% ADZ])
 
 for(i in 1:len_){
   ## R_pearson: vector num con coef corr Pearson 
@@ -643,20 +643,20 @@ for(i in 1:len_){
   df_R_Spearman_mes[i,]  <- corrs
 }
 
-R_Spearman_long <- df_R_Spearman_mes %>%
-  pivot_longer(cols = everything(), 
+df_R_Spearman_mes$CodigoEstacion = sttns.points$CodigoEstacion[!sttns.points$DEPARTAMENTO %in% ADZ]
+
+df_R_Spearman_mes <- df_R_Spearman_mes %>%
+  pivot_longer(cols = all_of(meses), 
                names_to = "Mes", 
                values_to = "r_s")
 
 # factor ordenado especifica levels
-R_Spearman_long = R_Spearman_long %>% mutate(
-  mes = factor(Mes, levels = c("enero", "febrero", "marzo", "abril", "mayo", 
-                               "junio", "julio", "agosto", "septiembre", "octubre", 
-                               "noviembre", "diciembre")))
+df_R_Spearman_mes = df_R_Spearman_mes %>% mutate(
+  mes = factor(Mes, levels = meses))
 
-bx_ = bx_text(R_Spearman_long, serie = mes, r = r_s)
+bx_ = bx_text(df_R_Spearman_mes, serie = mes, r = r_s)
 
-ggplot(R_Spearman_long, aes(x = mes, y = r_s)) +
+ggplot(df_R_Spearman_mes, aes(x = mes, y = r_s)) +
   geom_boxplot(fill = "lightblue", color = "black") +
   # texto de % outliers
   geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
@@ -677,6 +677,7 @@ ggplot(R_Spearman_long, aes(x = mes, y = r_s)) +
 
 # Boxplot por cat_mes (DJF, MAM, JJA, SON) ----
 cat_meses <- unique(pol2_list[[i]]$cat_mes)
+
 df_R_Spearman_cat_mes = data.frame(matrix(numeric(len_), nc = 4, nr = len_)) %>%
   `colnames<-`(cat_meses)
 
@@ -694,17 +695,19 @@ for(i in 1:len_){
   #R_Spearman_mes[[i]] <- corrs
 }
 
-R_Spearman_long <- df_R_Spearman_cat_mes %>%
-  pivot_longer(cols = everything(), 
+df_R_Spearman_cat_mes$CodigoEstacion = sttns.points$CodigoEstacion[!sttns.points$DEPARTAMENTO %in% ADZ]
+
+df_R_Spearman_cat_mes <- df_R_Spearman_cat_mes %>%
+  pivot_longer(cols = all_of(cat_meses), 
                names_to = "cat_mes", 
                values_to = "r_s")
 
-R_Spearman_long$cat_mes <- factor(R_Spearman_long$cat_mes, 
-                                  levels = c("DJF", "MAM", "JJA", "SON"))
+df_R_Spearman_cat_mes = mutate(df_R_Spearman_cat_mes, 
+                               cat_mes = factor(cat_mes, levels = cat_meses))
 
-bx_ = bx_text(R_Spearman_long, cat_mes, r_s)
+bx_ = bx_text(df_R_Spearman_cat_mes, cat_mes, r_s)
 
-ggplot(R_Spearman_long, aes(x = cat_mes, y = r_s)) +
+ggplot(df_R_Spearman_cat_mes, aes(x = cat_mes, y = r_s)) +
   geom_boxplot(fill = "lightblue", color = "black") +
   # texto de % outliers
   geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
@@ -723,79 +726,38 @@ ggplot(R_Spearman_long, aes(x = cat_mes, y = r_s)) +
        y = expression(r["s"])) 
 
 # Scatterplot r_s vs altitud ----
-df_pearson = data.frame(r = c(R_pearson, d_R_pearson),
-                        serie = rep(c("original", "dif estacional"), each = length(R_pearson)))
 
-df_Spearman = data.frame(r_s = c(R_Spearman, d_R_Spearman),
-                         serie = rep(c("original", "dif estacional"), each = length(R_Spearman)))
+# sttns.points: trae geometry
+# SRTM_30.sttns: trae SRTM_30 (altitud)
+# df_corr: trae los coef corr r_s
+sttns.points = left_join(sttns.points, SRTM_30.sttns, by = 'CodigoEstacion') %>% 
+  left_join(df_corr, by = 'CodigoEstacion')
 
-geometry_ <- lapply(pol3_list, function(df_) unique(df_$geometry.y))
-geometry_ <- do.call(c, geometry_)  # Combina las geometrías en un solo objeto sf
-geometry_ <- st_sfc(geometry_) 
-geometry_ <- geometry_[!st_is_empty(geometry_)]
-geometry_df <- data.frame(geometry = geometry_)
-class(geometry_df$geometry)
-
-# se requiere traer las columnas región, mes y cat_mes
-# cómo se traen las regiones más arriba?
-df_Spearman_alt = data.frame(r_s = d_R_Spearman,
-                             altitud = SRTM_30.sttns$SRTM_30_Col1,
-                             geometry = geometry_df$geometry)
-
-# scatterplot v1
-ggplot(df_Spearman_alt, aes(x = r_s, y = altitud)) +
+# scatterplot v1: r_s vs altitud
+sttns.points %>% filter(!is.na(SRTM_30 )) %>% 
+ggplot(aes(x = d_R_Spearman, y = SRTM_30)) +
   geom_point(color = "blue", size = 3) +
   geom_smooth(method = "lm", color = "red", se = TRUE) +
-  labs(title = expression("Diagrama de dispersión r"["s"] ~ "vs altitud "),
+  labs(title = expression("Diagrama de dispersión coef corr Spearman r"["s"] ~ "vs altitud "),
        x = expression(r["s"]),
        y = "Altitud") +
   theme_minimal()
 
-dim(pol3_list[[1]])
+# panel scatterplot: r_s por mes/grupo meses vs altitud
+df_R_Spearman_mes = left_join(df_R_Spearman_mes, SRTM_30.sttns, by = 'CodigoEstacion')
+df_R_Spearman_cat_mes = left_join(df_R_Spearman_cat_mes, SRTM_30.sttns, by = 'CodigoEstacion')
 
-df_stats_r <- df_pearson %>%
-  group_by(serie) %>%
-  summarise(
-    Q1 = quantile(r, 0.25),
-    Q2 = median(r),
-    Q3 = quantile(r, 0.75)
-  )
-
-df_stats <- df_Spearman %>%
-  group_by(serie) %>%
-  summarise(
-    Q1 = quantile(r_s, 0.25),
-    Q2 = median(r_s),
-    Q3 = quantile(r_s, 0.75)
-  )
-
-# Boxplot Corr Pearson ----
-ggplot(df_pearson, aes(x = serie, y = r, fill = serie)) +
-  geom_boxplot() +
-  geom_text(data = df_stats_r, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
-  geom_text(data = df_stats_r, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
-  geom_text(data = df_stats_r, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  labs(title = "Boxplots del coef de Pearson", y = expression(r)) +
-  theme_minimal() +
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14) ) 
-
-# Boxplot Corr Spearman ----
-ggplot(df_Spearman, aes(x = serie, y = r_s, fill = serie)) +
-  geom_boxplot() +
-  geom_text(data = df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
-  geom_text(data = df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
-  geom_text(data = df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  labs(title = "Boxplots del coef de Spearman", y = expression(r[s])) +
-  theme_minimal() +
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14) ) 
+ggplot(df_R_Spearman_mes, aes(x = r_s, y = SRTM_30)) +
+#ggplot(df_R_Spearman_cat_mes, aes(x = r_s, y = SRTM_30)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = expression("Diagrama de dispersión r"["s"] ~ "por mes vs altitud"),
+  #labs(title = expression("Diagrama de dispersión r"["s"] ~ "por grupo de meses vs altitud"),
+       x = expression(r["s"]),
+       y = "Altitud") +
+  theme_minimal()+
+  facet_wrap(~ mes, scales = "free")
+  #facet_wrap(~ cat_mes, scales = "free")
 
 # Distribución espacial de R_s ----
 shp_depto <- st_read("Departamentos202208_shp/Depto.shp")
@@ -1566,6 +1528,7 @@ SRTM_30.sttns %>% filter(ID %in% sample(SRTM_30.sttns$ID, size = 6, replace = FA
 #                                 ifelse(pcp_col$SRTM > Q2 & pcp_col$SRTM <= Q3,2,
 #                                        ifelse(pcp_col$SRTM > Q3, 1, NA))))
 #table(pcp_col$n_chirps)
+
 
 
 
