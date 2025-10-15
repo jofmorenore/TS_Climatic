@@ -362,7 +362,7 @@ abline(v = 1/6, col = 'blue')
 abline(v = 1/4, col = 'green')
 
 y <- tsibble::tsibble(pol2_list[[s_p4]] %>% mutate(Date = as.Date(Date)) 
-                      %>%  select(c("Date" ,  "chirps-v2-0")), index = Date)
+                      %>% dplyr::select(c("Date" ,  "chirps-v2-0")), index = Date)
 
 y = y %>% mutate(Date = yearmonth(Date)) %>% 
   as_tsibble(index = Date)
@@ -389,8 +389,6 @@ for(i in 1:len_){
   pol2_list[[i]]$d_chirps.v2.0 = c(rep(NA, df_pgram$period[i]),
                                    d_chirps.v2.0[[i]]$`chirps-v2-0`)
 }
-
-View(d_chirps.v2.0[[i]])
 
 ## 8.5 obtiene orden AR usando ts CHIRPS diff estacionalmente ----
 ## con diferencia ordinaria (diff_ = TRUE)
@@ -453,256 +451,276 @@ table(df_ur3$RD_t1) # R. H0: concluye no hay Raíz unitaria (estacionaria?)
 
 # 9 .Calculas medidas de desempeño ----
 
-
-# Calculas medidas de desempeño ----
-# r pearson ----
-for(i in 1:length(pol3_list)){
-  pol3_list[[i]]$mes = format(as.Date(paste0(pol3_list[[i]]$Date, ".01"), format = "%Y.%m.%d"), "%B")
+## 9.1 crea cols mes y cat_mes ----
+for(i in 1:len_){
+  pol2_list[[i]]$mes = format(as.Date(pol2_list[[i]]$Date), "%B")
 }
 
-# crear variable categorica (DJF/MAM/JJA/SON) a partir de la variable mes 
-DJF_ = c("diciembre", "enero", "febrero" )
-MAM_ = c("marzo", "abril", "mayo")
-JJA_ = c("junio", "julio", "agosto")
-SON_ = c("septiembre", "octubre", "noviembre")
-for(i in 1:length(pol3_list)){
-  pol3_list[[i]]$cat_mes = ifelse(pol3_list[[i]]$mes %in% DJF_, 
-                                  'DJF', ifelse(pol3_list[[i]]$mes %in% MAM_,
-                                                'MAM', ifelse(pol3_list[[i]]$mes %in% JJA_,
-                                                              'JJA', ifelse(pol3_list[[i]]$mes %in% SON_, 'SON', NA))))
+meses_ = unique(pol2_list[[i]]$mes)
+DJF_ = meses_[c(12,1,2)] # c("diciembre", "enero", "febrero" )
+MAM_ = meses_[3:5] # c("marzo", "abril", "mayo")
+JJA_ = meses_[6:8] # c("junio", "julio", "agosto")
+SON_ = meses_[9:11] # c("septiembre", "octubre", "noviembre")
+
+for(i in 1:len_){
+  ## crear col cat (DJF/MAM/JJA/SON) a partir de la variable mes 
+  pol2_list[[i]]$cat_mes <-
+    ifelse(pol2_list[[i]]$mes %in% DJF_, 'DJF', 
+           ifelse(pol2_list[[i]]$mes %in% MAM_, 'MAM', 
+                  ifelse(pol2_list[[i]]$mes %in% JJA_, 'JJA', 
+                         ifelse(pol2_list[[i]]$mes %in% SON_, 'SON', NA))))
 }
 
-R_pearson = c()
-for(i in 1:length(pol2_list)){
-  R_pearson[i] = cor(pol2_list[[i]]$chirps.v2.0, pol2_list[[i]]$sttns, use = "complete.obs")
-}
-
-R_Spearman = c()
-for(i in 1:length(pol3_list)){
-  R_Spearman[i] = cor(pol3_list[[i]]$chirps.v2.0, pol3_list[[i]]$sttns, 
-                      use = "complete.obs", method = "spearman")
-}
-
+## 9.2 d_sttns: lista con dfs de ts sttns diff estacionalmente ----
+## misma transformación que en 8.4 para ts CHIRPS diff estacionalmente
+## calcula R_s con ts diff estacionalmente (juzgadas como estacionarias por prueba ADF)
 d_sttns = list()
-for(i in 1:length(pol3_list)){
-  d_sttns[[i]] = diff(pol3_list[[i]]$sttns, 
-                      lag = round(df_periodograma$period[i]))
+for(i in 1:len_){
+  # aplica la misma diff estacional a partir del periodo obtenido con ts CHIRPS
+  # por criterio de misma transformación
+  d_sttns[[i]] = data.frame(sttns = diff(pol2_list[[i]]$sttns, 
+                                         lag = df_pgram$period[i]))
 }
 
-for(i in 1:length(pol3_list)){
-  pol3_list[[i]]$d_sttns = c(rep(NA, round(df_periodograma$period[i])),
-                             diff(pol3_list[[i]]$sttns, 
-                                  lag = round(df_periodograma$period[i])))
+## crea la col para poder calcular corr por mes, cat_mes y región_natural
+for(i in 1:len_){
+  ## crea col d_sttns en lista pol2_list
+  pol2_list[[i]]$d_sttns = c(rep(NA, round(df_pgram$period[i])),
+                             d_sttns[[i]]$sttns)
 }
 
-# Boxplot por mes ----
-R_Spearman_mes = list()
-for(i in 1:length(pol3_list)){
-  meses <- unique(pol3_list[[i]]$mes)
-  # Calculamos el coeficiente de correlación de Spearman para cada mes
+## 9.3 df_corr: data frame para graficar coef corr ----
+
+df_corr = data.frame(R_pearson = numeric(len_), R_Spearman = numeric(len_), 
+                     d_R_pearson = numeric(len_), d_R_Spearman = numeric(len_))
+
+for(i in 1:len_){
+  ## R_pearson: vector num con coef corr Pearson 
+  df_corr$R_pearson[i] = cor(pol2_list[[i]]$`chirps-v2-0`, pol2_list[[i]]$sttns, 
+                             use = "complete.obs")
+  ## R_Spearman: vector num con coef corr Spearman a ts original 
+  df_corr$R_Spearman[i] = cor(pol2_list[[i]]$`chirps-v2-0`, pol2_list[[i]]$sttns, 
+                              use = "complete.obs", method = "spearman")
+  ## d_R_pearson: vector num con coef corr Pearson a ts diff estacionalmente 
+  df_corr$d_R_pearson[i] = cor(d_chirps.v2.0[[i]]$`chirps-v2-0`, d_sttns[[i]]$sttns, 
+                               use = "complete.obs")
+  ## d_R_Spearman: vector num con coef corr Spearman a ts diff estacionalmente 
+  df_corr$d_R_Spearman[i] = cor(d_chirps.v2.0[[i]]$`chirps-v2-0`, d_sttns[[i]]$sttns, 
+                                use = "complete.obs", method = "spearman")
+}
+
+# Boxplot comparación Corr Pearson ts diff estacionalmente vs ts original ----
+df_pearson = df_corr %>% dplyr::select(c(R_pearson, d_R_pearson)) %>% 
+  pivot_longer(cols = everything(), names_to = "serie", values_to = "r") %>% 
+  mutate(serie = factor(serie, labels = c("diff estacionalmente", "original")))
+
+bx_text = function(df, serie, r){
+  # Argumentos: ----------------------------------------------------------------
+  # 
+  # df data frame con cols serie y r
+  # serie str col para agrupar 
+  # r num col para resumir 
+  #----------------------------------------------------------------------------
+  output = list()
+  
+  output$df_stats = df %>% 
+    group_by({{serie}}) %>% 
+    summarise(
+      Q1 = quantile({{r}}, 0.25), Q2 = median({{r}}), Q3 = quantile({{r}}, 0.75)
+    )
+  
+  output$df_outliers = df %>%
+    group_by({{serie}}) %>%
+    summarise(
+      min_r = min({{r}}) - 0.1,
+      Q1 = quantile({{r}}, 0.25, na.rm = TRUE),
+      Q3 = quantile({{r}}, 0.75, na.rm = TRUE),
+      IQR = Q3 - Q1,
+      lower_bound = Q1 - 1.5 * IQR,
+      upper_bound = Q3 + 1.5 * IQR,
+      outlier_count = sum({{r}} < lower_bound | {{r}} > upper_bound, na.rm = TRUE),
+      total_count = n(),
+      outlier_pct = round((outlier_count / total_count) * 100, 1) # Porcentaje de atípicos
+    )
+  return(output)
+}
+
+bx_ = bx_text(df_pearson, serie, r)
+
+## Al comparar graficamente el coef corr Pearson de la ts original vs ts diff estacionalmente
+## +obs1: se observa que r_pearson para la ts original está inflado y sobreestima el valor de corr
+## +obs2: el % de outliers disminuye al transformar diff estacionalmente
+
+ggplot(df_pearson, aes(x = fct_rev(serie), y = r, fill = serie)) +
+  geom_boxplot() + 
+  # texto de % outliers
+  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+            size = 3, color = "black", fontface = "bold") +
+  # texto quartiles y valores
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  # título y nombres de ejes
+  labs(title = "Boxplots del coef corr Pearson", x = "serie", y = expression(r)) +
+  theme_minimal() +
+  # sin leyenda y tamaño del texto de los ejes
+  theme(legend.position = "none", axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title=element_text(size=14),
+        plot.title = element_text(size=14,face="bold"))
+
+# Boxplot coef corr Spearman ----
+# df para graficar boxpot coef corr Spearman ts original vs ts transformada
+df_Spearman = df_corr %>% dplyr::select(c(R_Spearman, d_R_Spearman)) %>% 
+  pivot_longer(cols = everything(), names_to = "serie", values_to = "r_s") %>% 
+  mutate(serie = factor(serie, labels = c("diff estacionalmente", "original")))
+
+quantile(df_corr$d_R_Spearman)
+
+bx_ = bx_text(df_Spearman, serie, r_s)
+
+## +obs1: se observa que r_Spearman para la ts original está inflado y sobreestima el valor de r_s
+## +obs2: el % de outliers disminuye al transformar diff estacionalmente
+## +obs3: El RIQ es mayor en la ts diff estacionalmente, la variabilidad de r_s aumenta (amplitud de la caja)
+## +obs4: menos % outliers (1.9% a 2.2%) en ts diff estacionalmente que en corr_Pearson
+
+ggplot(df_Spearman, aes(x = fct_rev(serie), y = r_s, fill = serie)) +
+  geom_boxplot() +
+  # texto de % outliers
+  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+            size = 3, color = "black", fontface = "bold") +
+  # texto quartiles y valores
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  # título y nombres de ejes
+  labs(title = "Boxplots del coef de Spearman", x = "serie", y = expression(r[s])) +
+  theme_minimal() +
+  # sin leyenda y tamaño del texto de los ejes
+  theme(legend.position = "none", axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title=element_text(size=14),
+        plot.title = element_text(size=14, face="bold")) 
+
+# 9.4 test de significancia coef corr spearman a ts diff estacionalmente ----
+test_d_R_Spearman = c()
+for(i in 1:len_){
+  obj_ = cor.test(d_chirps.v2.0[[i]]$`chirps-v2-0`, d_sttns[[i]]$sttns, 
+                  method = "spearman", exact = FALSE)
+  test_d_R_Spearman[i] = obj_$p.value
+}
+
+# todos significativos a un nivel de confianza del 95%
+max(test_d_R_Spearman) # max es 0.03 < 0.05 (con lo cual R H0 y conlcuye R_s != 0 por tanto R_s significativos)
+# 1 valor de rho 0.10 con p-value 0.03
+df_corr$d_R_Spearman[which(test_d_R_Spearman>=0.01)] # valor de rho
+test_d_R_Spearman[which(test_d_R_Spearman>=0.01)] # valor de los p-value
+
+## Boxplot por mes ----
+## transformaciones para poder graficas boxplot
+# R_Spearman_df: df c/col es un mes
+meses <- unique(pol2_list[[i]]$mes)
+df_R_Spearman_mes = data.frame(matrix(numeric(len_), nc = 12, nr = len_)) %>%
+  `colnames<-`(meses)
+
+for(i in 1:len_){
+  # Calculamos el coef corr Spearman para c/mes
   corrs <- sapply(meses, function(m){
-    # Filtramos los datos para el mes 'm'
-    data_mes <- subset(pol3_list[[i]], mes == m)
-    # Calculamos el coeficiente de correlación de Spearman
-    cor_value <- cor(data_mes$d_chirps.v2.0, data_mes$d_sttns, use = "complete.obs", method = "spearman")
+    # Filtra datos para el mes 'm'
+    df_mes <- subset(pol2_list[[i]], mes == m)
+    # Calcula coef corr Spearman
+    cor_value <- cor(df_mes$d_chirps.v2.0, df_mes$d_sttns, 
+                     use = "complete.obs", method = "spearman")
     return(cor_value)
   })
   # Almacenamos los resultados en el listado de R_Spearman
-  R_Spearman_mes[[i]] <- corrs
+  df_R_Spearman_mes[i,]  <- corrs
 }
 
-R_Spearman_df <- as.data.frame(R_Spearman_mes)
-R_Spearman_df <- t(R_Spearman_df)
-R_Spearman_df <- as.data.frame(R_Spearman_df)
-colnames(R_Spearman_df) <- unique(pol3_list[[1]]$mes)
-rownames(R_Spearman_df) <- 1:nrow(R_Spearman_df)
-
-R_Spearman_long <- R_Spearman_df %>%
+R_Spearman_long <- df_R_Spearman_mes %>%
   pivot_longer(cols = everything(), 
                names_to = "Mes", 
-               values_to = "Spearman_R")
+               values_to = "r_s")
 
-R_Spearman_long$Mes <- factor(R_Spearman_long$Mes, 
-                              levels = c("enero", "febrero", "marzo", "abril", "mayo", 
-                                         "junio", "julio", "agosto", "septiembre", "octubre", 
-                                         "noviembre", "diciembre"))
+# factor ordenado especifica levels
+R_Spearman_long = R_Spearman_long %>% mutate(
+  mes = factor(Mes, levels = c("enero", "febrero", "marzo", "abril", "mayo", 
+                               "junio", "julio", "agosto", "septiembre", "octubre", 
+                               "noviembre", "diciembre")))
 
-ggplot(R_Spearman_long, aes(x = Mes, y = Spearman_R)) +
+bx_ = bx_text(R_Spearman_long, serie = mes, r = r_s)
+
+ggplot(R_Spearman_long, aes(x = mes, y = r_s)) +
   geom_boxplot(fill = "lightblue", color = "black") +
+  # texto de % outliers
+  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+            size = 3, color = "black", fontface = "bold") +
+  # texto quartiles y valores
+  geom_text(data = bx_$df_stats, aes(x = mes, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = mes, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = mes, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  # título y nombres de ejes
   theme_minimal() +
-  labs(title = expression("Boxplot de r"["s"] ~ "por mes"),
+  labs(title = expression("Boxplot del coef corr Spearman r"["s"] ~ "por mes"),
        x = "Mes", 
        y = expression(r["s"])) #+
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # Boxplot por cat_mes (DJF, MAM, JJA, SON) ----
-R_Spearman_mes = list()
-for(i in 1:length(pol3_list)){
-  meses <- unique(pol3_list[[i]]$cat_mes)
+cat_meses <- unique(pol2_list[[i]]$cat_mes)
+df_R_Spearman_cat_mes = data.frame(matrix(numeric(len_), nc = 4, nr = len_)) %>%
+  `colnames<-`(cat_meses)
+
+for(i in 1:len_){
   # Calculamos el coeficiente de correlación de Spearman para cada mes
-  corrs <- sapply(meses, function(m){
+  corrs <- sapply(cat_meses, function(m){
     # Filtramos los datos para el mes 'm'
-    data_mes <- subset(pol3_list[[i]], cat_mes == m)
+    data_mes <- subset(pol2_list[[i]], cat_mes == m)
     # Calculamos el coeficiente de correlación de Spearman
     cor_value <- cor(data_mes$d_chirps.v2.0, data_mes$d_sttns, use = "complete.obs", method = "spearman")
     return(cor_value)
   })
   # Almacenamos los resultados en el listado de R_Spearman
-  R_Spearman_mes[[i]] <- corrs
+  df_R_Spearman_cat_mes[i,] <- corrs
+  #R_Spearman_mes[[i]] <- corrs
 }
 
-R_Spearman_df <- as.data.frame(R_Spearman_mes)
-R_Spearman_df <- t(R_Spearman_df)
-R_Spearman_df <- as.data.frame(R_Spearman_df)
-colnames(R_Spearman_df) <- unique(pol3_list[[1]]$cat_mes)
-rownames(R_Spearman_df) <- 1:nrow(R_Spearman_df)
-
-R_Spearman_long <- R_Spearman_df %>%
+R_Spearman_long <- df_R_Spearman_cat_mes %>%
   pivot_longer(cols = everything(), 
-               names_to = "Cat_mes", 
-               values_to = "Spearman_R")
+               names_to = "cat_mes", 
+               values_to = "r_s")
 
-R_Spearman_long$Cat_mes <- factor(R_Spearman_long$Cat_mes, 
+R_Spearman_long$cat_mes <- factor(R_Spearman_long$cat_mes, 
                                   levels = c("DJF", "MAM", "JJA", "SON"))
 
-# ANOVA por grupo de meses ----
-modelo <- aov(Spearman_R ~ Cat_mes, data = R_Spearman_long)
-modelo_ = summary(modelo)
-p_value = modelo_[[1]]$`Pr(>F)`[1]
-print(ifelse(p_value <= 0.05, "R. H0, concluye dif significativas entre al menos dos grupos",
-             "NO R. H0, concluye no hay dif significativas"))
+bx_ = bx_text(R_Spearman_long, cat_mes, r_s)
 
-tukey <- TukeyHSD(modelo)
-#par(mar = c(5, 10, 4, 2)) 
-plot(tukey, las =1)
-
-# validación de supuestos
-## Normalidad
-plot(density(modelo$residuals))
-qqnorm(modelo$residuals)
-qqline(modelo$residuals, col = "red")
-
-lillie.test(modelo$residuals)
-shapiro.test(modelo$residuals)
-
-## Homocedasticidad
-leveneTest(Spearman_R ~ Cat_mes, data = R_Spearman_long)
-bptest(modelo)
-
-## Autocorrelación
-dwtest(modelo)
-
-# Calcular los valores atípicos por mes
-outliers_df <- R_Spearman_long %>%
-  group_by(Cat_mes) %>%
-  summarise(
-    Q1 = quantile(Spearman_R, 0.25, na.rm = TRUE),
-    Q3 = quantile(Spearman_R, 0.75, na.rm = TRUE),
-    IQR = Q3 - Q1,
-    lower_bound = Q1 - 1.5 * IQR,
-    upper_bound = Q3 + 1.5 * IQR,
-    outlier_count = sum(Spearman_R < lower_bound | Spearman_R > upper_bound, na.rm = TRUE),
-    total_count = n(),
-    outlier_pct = round((outlier_count / total_count) * 100, 1) # Porcentaje de atípicos
-  )
-
-# Unir el dataframe con los datos originales para graficar
-R_Spearman_long <- left_join(R_Spearman_long, outliers_df, by = "Cat_mes")
-
-ggplot(R_Spearman_long, aes(x = Cat_mes, y = Spearman_R)) +
+ggplot(R_Spearman_long, aes(x = cat_mes, y = r_s)) +
   geom_boxplot(fill = "lightblue", color = "black") +
-  #geom_hline(yintercept = 0.68, linetype = "dashed", color = "red", size = 1) +
-  geom_text(aes(label = paste0(outlier_pct, "% \n outliers"), y = min(Spearman_R, na.rm = TRUE) + 0.05), 
+  # texto de % outliers
+  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
             size = 3, color = "black", fontface = "bold") +
+  # texto quartiles y valores
+  geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4) +
+  # título y nombres de ejes
   theme_minimal() +
-  labs(title = expression("Boxplot de r"["s"] ~ "por grupo de meses"),
-       x = "Meses", 
+  labs(title = expression("Boxplot del coef corr Spearman r"["s"] ~ "por grupo de meses"),
+       x = "meses", 
        y = expression(r["s"])) 
-
-d_R_pearson = c()
-for(i in 1:length(pol2_list)){
-  d_R_pearson[i] = cor(d_chirps.v2.0[[i]], d_sttns[[i]], use = "complete.obs")
-}
-
-d_R_Spearman = c()
-for(i in 1:length(pol3_list)){
-  d_R_Spearman[i] = cor(d_chirps.v2.0[[i]], d_sttns[[i]], 
-                      use = "complete.obs", method = "spearman")
-}
-
-# test de significancia coef corr spearman ----
-
-test_d_R_Spearman = c()
-for(i in 1:length(pol3_list)){
-  obj_ = cor.test(d_chirps.v2.0[[i]], d_sttns[[i]], 
-                             method = "spearman", exact = FALSE)
-  test_d_R_Spearman[i] = obj_$p.value
-}
-
-# todos significativos a un nivel de confianza del 95%
-summary(test_d_R_Spearman)
-
-
-length(test_d_R_Spearman[test_d_R_Spearman>=0.05])
-which(test_d_R_Spearman>=0.01)
-# dos valores de rho (0.10 y 0.11) con p-value 0.02 y 0.01
-d_R_Spearman[which(test_d_R_Spearman>=0.01)] # valor de rho
-test_d_R_Spearman[which(test_d_R_Spearman>=0.01)] # valor de los p-value
-
-df_test = data.frame(test = test_d_R_Spearman, dif_est =  d_R_Spearman)
-table(df_test$test==df_test$dif_est)
-
-# Coef de corr spearman cruzado ----
-ccf_spearman <- function(x, y, max_lag = 10) {
-  #x_rank <- rank(x)
-  #y_rank <- rank(y)
-  x_rank <- x
-  y_rank <- y
-  
-  lags <- seq(-max_lag, max_lag)
-  cor_values <- sapply(lags, function(lag) {
-    if (lag < 0) {
-      cor(x_rank[1:(length(x) + lag)],y_rank[(1 - lag):length(y)], 
-          method = "spearman", use = "complete.obs")
-    } else if (lag > 0) {
-      cor(x_rank[(1 + lag):length(x)], y_rank[1:(length(y) - lag)], 
-          method = "spearman", use = "complete.obs")
-    } else {
-      cor(x_rank, y_rank, method = "spearman", use = "complete.obs")
-    }
-  })
-  df_cor <- as.data.frame(t(cor_values))
-  colnames(df_cor) <- paste0("Lag_", lags)
-  
-  return(df_cor)
-}
-
-d_ccf_R_Spearman = list()
-for(i in 1:length(pol3_list)){
-  d_ccf_R_Spearman[[i]] = ccf_spearman(d_chirps.v2.0[[i]], d_sttns[[i]], max_lag = 12)
-}
-
-df_d_ccf_R_Spearman = d_ccf_R_Spearman %>% bind_rows()
-#df_d_ccf_R_Spearman = df_d_ccf_R_Spearman %>% bind_cols(R_s = d_R_Spearman)
-#table(df_d_ccf_R_Spearman$Lag_0 == df_d_ccf_R_Spearman$R_s)
-
-# Pivotear el data frame a formato largo
-df_d_ccf_R_Spearman <- df_d_ccf_R_Spearman %>%
-  pivot_longer(cols = everything(), 
-               names_to = "Lag", 
-               values_to = "Spearman_Correlation")
-
-df_d_ccf_R_Spearman =df_d_ccf_R_Spearman %>% 
-  mutate(Lag = factor(Lag, levels = paste0("Lag_", -12:12)))
-
-# Crear el gráfico de boxplot ccf R Spearman ----
-ggplot(df_d_ccf_R_Spearman, aes(x = Lag, y = Spearman_Correlation)) +
-  geom_boxplot(fill = "lightblue", color = "black") + 
-  theme_minimal() +
-  labs(title = "Distribución de la Correlación de Spearman por Lag",
-       x = "Lag",
-       y = "Coeficiente de Spearman") +
-  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))  # Rotar etiquetas en eje X
 
 # Scatterplot r_s vs altitud ----
 df_pearson = data.frame(r = c(R_pearson, d_R_pearson),
@@ -1548,5 +1566,6 @@ SRTM_30.sttns %>% filter(ID %in% sample(SRTM_30.sttns$ID, size = 6, replace = FA
 #                                 ifelse(pcp_col$SRTM > Q2 & pcp_col$SRTM <= Q3,2,
 #                                        ifelse(pcp_col$SRTM > Q3, 1, NA))))
 #table(pcp_col$n_chirps)
+
 
 
