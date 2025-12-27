@@ -1,4 +1,3 @@
-
 library(dplyr)
 library(lubridate)
 library(factoextra)
@@ -9,8 +8,21 @@ library(tidyr)
 library(gridExtra)
 library(grid)
 
+library(MASS)
+library(cluster)
+library(survival)
+library(randomForest)
+library(Hmisc)
+
+library(dtwclust)
+library(doParallel)
+library(stringr)
+library(ggplot2)
+library(clue)
+
 library (geofd)
 library(sf)
+library(sp)
 library(fda)
 library(maps)
 library(dplyr)
@@ -37,9 +49,11 @@ for(i in 1:length(geometry_)){
   df_pcp_annual_mean$Y[i] = geometry_[[i]][[1]][2]
 }
 
+shp_depto <- st_read("Departamentos202208_shp/Depto.shp")
+
 # crea variable escalada
 df_pcp_annual_mean$pcp_scaled = scale(df_pcp_annual_mean$`mean(annual_pcp)`) 
-write.table(df_pcp_annual_mean, '~/df_pcp_annual_mean.csv', sep = ',', col.names = T, row.names = F)
+#write.table(df_pcp_annual_mean, '~/df_pcp_annual_mean.csv', sep = ',', col.names = T, row.names = F)
 # 1. K-means -------------------------------------------------------------------
 
 # Wss
@@ -74,7 +88,6 @@ for(k in n_optim){
   km_list[[k]] = kmeans(df_, k, nstart = 25)
 }
 
-print(km_list[[4]])
 
 df_pcp_annual_mean = df_pcp_annual_mean %>% 
   mutate(clust2 = factor(km_list[[2]]$cluster),
@@ -88,8 +101,6 @@ ggplot(df_pcp_annual_mean, aes(X, Y, color = clust2)) +
 df_km_pcp_annual_mean = st_as_sf(df_pcp_annual_mean, 
                                  coords = c('X', 'Y'),
                                  crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
-
-shp_depto <- st_read("Departamentos202208_shp/Depto.shp")
 
 map2 <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
@@ -194,12 +205,6 @@ pct13_ <- df_km_pcp_annual_mean %>%
 grid.arrange(pct2_, pct4_, pct13_, ncol = 3)
 
 # 2. Random Forest -----
-
-library(MASS)
-library(cluster)
-library(survival)
-library(randomForest)
-library(Hmisc)
 
 ## Rand: función ...
 if (exists("Rand") ) rm(Rand)
@@ -356,7 +361,9 @@ if (exists("RFdist") ) rm(RFdist)
     g2      <- function(dat) { apply(dat,2,sample2) }
     nrow1 <- dim(dat)[[1]];
     yy <- rep(c(1,2),c(nrow1,nrow1) );
-    data.frame(cbind(yy,rbind(dat,data.frame(g2(dat)))))
+    data.frame(cbind(yy,
+                     rbind(data.frame(dat),
+                           data.frame(g2(dat)))))
   }
   
   cleandist <- function(x) { 
@@ -511,6 +518,11 @@ for(i in 1:length(geometry_)){
 }
 
 mtrx <- as.matrix(df_pcp_monthly_normal[,2:(ncol(df_pcp_monthly_normal)-2)])
+mtrx = scale(mtrx) 
+
+# RandomForest se puede ahcer son una sola columna? R. No arroja error en  factor(yy) ~ ., data = datRFsyn[, 
+#mtrx_1 <- as.matrix(df_pcp_annual_mean[,5])
+
 nfrs <- 50
 ntrs <- 500 # 1000
 # mtry1: sqrt(p) -> sqrt(12) = 3.4
@@ -523,6 +535,15 @@ rfds <- RFdist(mtrx,
                imp = T, 
                oob.prox1 = T)
 
+rfds2 <- RFdist(mtrx, 
+                mtry1 = 4, # num de variables en c/división
+                ntrs, # num de árboles
+                nfrs, # num de repeticiones/ num de bosques a promediar
+                addcl1 = F, 
+                addcl2 = T, 
+                imp = T, 
+                oob.prox1 = T)
+
 #lbrf <- pamNew(rfds$cl1, 5)
 
 lbrf = list()
@@ -530,15 +551,39 @@ for(k in 2:16){
   lbrf[[k]] <- pamNew(rfds$cl1, k)
 }
 
+lbrf2 = list()
+for(k in 2:16){
+  lbrf2[[k]] <- pamNew(rfds2$cl2, k)
+}
+
 avg_silhouette_width = c()
+avg_silhouette_width2 = c()
+
 for(i in 2:length(lbrf)){
   avg_silhouette_width = c(avg_silhouette_width,
                            lbrf[[i]]$avg_silhouette_width)
 }
 
+for(i in 2:length(lbrf2)){
+  avg_silhouette_width2 = c(avg_silhouette_width2,
+                           lbrf2[[i]]$avg_silhouette_width)
+}
+
+
 df_RF_ = data.frame(k = 2:16, avg_silhouette_width)
+df_RF_2 = data.frame(k = 2:16, avg_silhouette_width2)
 
 ggplot(df_RF_, aes(x = k, y = avg_silhouette_width))+
+  geom_line() +
+  geom_point()+
+  scale_x_continuous(breaks = seq(1, 16, 1)) +
+  labs(x = 'Number of clusters k',
+       y = 'Average Silhouette width')+
+  theme(axis.text.x = element_text(size = 24),
+        axis.text.y = element_text(size = 24),
+        axis.title=element_text(size=24))
+
+ggplot(df_RF_2, aes(x = k, y = avg_silhouette_width2))+
   geom_line() +
   geom_point()+
   scale_x_continuous(breaks = seq(1, 16, 1)) +
@@ -555,7 +600,26 @@ df_pcp_monthly_normal = df_pcp_monthly_normal %>% ungroup() %>%
   mutate(clust2_RF = factor(lbrf[[2]]$label),
          clust4_RF = factor(lbrf[[4]]$label))
 
+df_pcp_monthly_normal2 = df_pcp_monthly_normal %>% ungroup() %>%  
+  mutate(clust2_RF = factor(lbrf2[[2]]$label),
+         clust3_RF = factor(lbrf2[[3]]$label))
+
+join_cluster = left_join(df_pcp_annual_mean,
+                         dplyr::select(df_pcp_monthly_normal,ID, clust4_RF, clust2_RF),
+                         by = c('ID'))
+
+join_cluster2 = left_join(df_pcp_annual_mean,
+                         dplyr::select(df_pcp_monthly_normal2,ID, clust3_RF, clust2_RF),
+                         by = c('ID'))
+
+table(join_cluster$clust2, join_cluster$clust2_RF)
+table(join_cluster$clust4, join_cluster$clust4_RF)
+
 df_RF_pivot_longer = df_pcp_monthly_normal %>% 
+  pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
+  mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
+
+df_RF_pivot_longer2 = df_pcp_monthly_normal2 %>% 
   pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
   mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
 
@@ -563,9 +627,28 @@ df_RF_pcp_monthly_normal = st_as_sf(df_pcp_monthly_normal,
                                     coords=c('X', 'Y'), 
                                     crs= "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
 
+df_RF_pcp_monthly_normal2 = st_as_sf(df_pcp_monthly_normal2, 
+                                    coords=c('X', 'Y'), 
+                                    crs= "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+
 map2_RF <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
   geom_sf(data = rename(df_RF_pcp_monthly_normal, 'Cluster'=clust2_RF), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))
+
+map2_RF2 <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_RF_pcp_monthly_normal2, 'Cluster'=clust2_RF), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))
+
+map3_RF2 <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_RF_pcp_monthly_normal2, 'Cluster'=clust3_RF), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
   theme_minimal()+
   theme(legend.position = c(0.9, 0.9))
@@ -585,6 +668,23 @@ bx2_RF <- ggplot(rename(df_RF_pivot_longer, 'Cluster'=clust2_RF),
   theme(legend.position = c(0.9, 0.9))+
   labs(y = "Normal precipitación mensual")
 
+bx2_RF2 <- ggplot(rename(df_RF_pivot_longer2, 'Cluster'=clust2_RF), 
+                 aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))+
+  labs(y = "Normal precipitación mensual")
+
+bx3_RF2 <- ggplot(rename(df_RF_pivot_longer2, 'Cluster'=clust3_RF), 
+                 aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))+
+  labs(y = "Normal precipitación mensual")
+
+
 bx4_RF <- ggplot(rename(df_RF_pivot_longer, 'Cluster'=clust4_RF), 
               aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
   geom_boxplot() + 
@@ -596,11 +696,44 @@ bx4_RF <- ggplot(rename(df_RF_pivot_longer, 'Cluster'=clust4_RF),
 grid.arrange(map2_RF, bx2_RF, ncol = 2)
 grid.arrange(map4_RF, bx4_RF, ncol = 2)
 
+grid.arrange(map2_RF2, bx2_RF2, ncol = 2)
+grid.arrange(map3_RF2, bx3_RF2, ncol = 2)
+
 pct2_RF <- df_pcp_monthly_normal %>% 
   count(clust2_RF) %>%
   mutate(pct = n / sum(n) * 100,
          label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
   ggplot(aes(x = "", y = n, fill = clust2_RF)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+pct2_RF2 <- df_pcp_monthly_normal2 %>% 
+  count(clust2_RF) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust2_RF)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+pct3_RF2 <- df_pcp_monthly_normal2 %>% 
+  count(clust3_RF) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust3_RF)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
   geom_text(aes(label = label),
@@ -632,16 +765,688 @@ grid.arrange(pct2_RF, pct4_RF, ncol = 2,
                gp = gpar(fontsize = 16, fontface = "bold")
              ))
 
-# 3. Hierachical clustering of spatially correlated fd -------------------------
+grid.arrange(pct2_RF2, pct3_RF2, ncol = 2,
+             top = textGrob(
+               "Porcentaje de estaciones metereológicas en cada cluster",
+               gp = gpar(fontsize = 16, fontface = "bold")
+             ))
+
+# 3. K-means normales mensuales -----------------------------------------------
+
+# Wss
+fnb1 <- fviz_nbclust(mtrx, FUN = kmeans, method = "wss") +
+  geom_hline(yintercept = km_list[[5]]$tot.withinss, linetype = 2) 
+
+# de 3  a 4 grupos
+# Silhouette
+fnb2 <- fviz_nbclust(mtrx, FUN = kmeans, 
+                     method = "silhouette", k.max = 20) # 2 o 3 grupos
+# gap_stat
+# compute gap statistic
+set.seed(12)
+gap_stat <- clusGap(mtrx, FUN = kmeans, nstart = 25,
+                    K.max = 25, B = 50)
+print(gap_stat, method = "firstmax")
+
+set.seed(12)
+fnb3 <- fviz_nbclust(mtrx, FUN = kmeans, method = "gap_stat", k.max = 50) #+ 
+  #geom_hline(yintercept = 0.81, linetype = 2) +
+  #coord_cartesian(xlim = c(1.75,20)) # 2, 13 o 16 grupos
+
+grid.arrange(fnb1, fnb2, ncol = 2)
+
+n_optim = c(2,3,4,5)
+km_list = list()
+
+for(k in n_optim){
+  km_list[[k]] = kmeans(mtrx, k, nstart = 25)
+}
+
+df_pcp_monthly_normal2 = df_pcp_monthly_normal %>% ungroup() %>% 
+  mutate(clust2 = factor(km_list[[2]]$cluster),
+         clust3 = factor(km_list[[3]]$cluster),
+         clust4 = factor(km_list[[4]]$cluster),
+         clust5 = factor(km_list[[5]]$cluster))
+
+ggplot(df_pcp_monthly_normal2, aes(X, Y, color = clust2)) +
+  geom_point(alpha = 0.25)
+
+row.names(mtrx) <- df_pcp_monthly_normal$ID
+fviz_cluster(km_list[[2]], data = mtrx)
+
+pca_res <- prcomp(mtrx, scale = TRUE, center = TRUE)
+loadings <- pca_res$rotation
+eigenvalues <- pca_res$sdev^2
+cor_var_PC <- sweep(loadings, 2, sqrt(eigenvalues), FUN = "*")
+cor_var_PC[, 1:2]
+
+contrib <- loadings^2
+contrib <- sweep(contrib, 2, colSums(contrib), FUN = "/")
+contrib <- contrib * 100
+contrib_PC1_PC2 <- contrib[, 1:2]
+
+PC_matrix <- pca_res$x
+plot_data <- PC_matrix[, 1:2]
+head(plot_data)
+
+ggplot(data.frame(plot_data), aes(PC1, PC2, color = factor(km_list[[2]]$cluster))) +
+  geom_point() +
+  theme_minimal()
+
+km_list[[2]]
+
+df_km_pivot_longer <- df_pcp_monthly_normal2 %>% 
+  pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
+  mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
+
+df_pcp_monthly_normal2 = st_as_sf(df_pcp_monthly_normal2, 
+                                  coords = c('X', 'Y'),
+                                  crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+
+map2 <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_pcp_monthly_normal2, 'Cluster'=clust2), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))
+
+map5 <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_pcp_monthly_normal2, 'Cluster'=clust5), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))
+
+bx2_km <- ggplot(rename(df_km_pivot_longer, 'Cluster'=clust2), 
+                 aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))+
+  labs(y = "Normal precipitación mensual")
+
+bx5_km <- ggplot(rename(df_km_pivot_longer, 'Cluster'=clust5), 
+                 aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))+
+  labs(y = "Normal precipitación mensual")
+
+
+grid.arrange(map2, bx2_km, ncol = 2)
+grid.arrange(map5, bx5_km, ncol = 2)
+
+pct2_km2 <- df_pcp_monthly_normal2 %>% 
+  count(clust2) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust2)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+pct5_km2 <- df_pcp_monthly_normal2 %>% 
+  count(clust5) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust5)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+grid.arrange(pct2_RF, pct4_RF, ncol = 2,
+             top = textGrob(
+               "Porcentaje de estaciones metereológicas en cada cluster",
+               gp = gpar(fontsize = 16, fontface = "bold")
+             ))
+
+grid.arrange(pct2_km2, pct5_km2, ncol = 2,
+             top = textGrob(
+               "Porcentaje de estaciones metereológicas en cada cluster",
+               gp = gpar(fontsize = 16, fontface = "bold")
+             ))
+
+names(df_pcp_monthly_normal2) # 2 o 5 grupos
+names(df_pcp_annual_mean) # 2, 4 o 13 grupos
+
+join_km = left_join(dplyr::select(df_pcp_annual_mean, ID, clust2, clust4) ,
+                    dplyr::select(df_pcp_monthly_normal2, ID, clust2, clust5) %>% 
+                      rename('clust2_km2'=clust2, 'clust5_km2'= clust5),
+                    by ='ID') 
+
+table(join_km$clust2, join_km$clust2_km2)
+table(join_km$clust4, join_km$clust5_km2)
+
+# 4. librería dtwclust ----
+
+# series are z-normalized by means of the zscore function.
+mtrx.norm <- zscore(mtrx)
+##centroid= "pam": Partition around medoids (PAM). This basically means that 
+## the cluster centroids are always one of the time series in the data.
+
+## 4.1 Simple partitional clustering with Euclidean distance and PAM centroids -----
+# sugiere 2 grupos
+#distance = "L2", centroid = "pam", seed = 3247, control = partitional_control(nrep = 10L)
+
+workers<-makeCluster(8L)
+
+invisible(clusterEvalQ(workers,library("dtwclust")))
+# Registerthebackend;thisstepMUSTbedone
+registerDoParallel(workers)
+
+clust.p_L2_pam <- tsclust(mtrx.norm, 
+                          type="partitional", 
+                          k=2L:13L, 
+                          distance="L2", window.size = 20L,
+                          centroid="pam",
+                          seed = 42)#,
+                          #control = partitional_control(nrep = 8L))
+
+stopCluster(workers)
+# Gobacktosequentialcomputation
+registerDoSEQ()
+
+## Cluster evaluation | Internal - Crisp partitions
+## CVI            -   Minimized or Maximized   -   Considerations
+## Silhouette     -   Maximized   -   Requires the whole cross-distance matrix.
+## Score function -   Maximized  - Calculates a global centroid.
+## Calinski-Harabasz - Maximized - Calculates a global centroid.
+## Davies-Bouldin -   Minimized    - Calculates distances to the computed cluster centroids.
+## Modified Davies-Bouldin (DB*) - Minimized - Calculates distances to the computed cluster centroids.
+## Dunn           -   Maximized   -   Requires the whole cross-distance matrix.
+## COP            -   Minimized   -   Requires the whole cross-distance matrix.
+
+names(clust.p_L2_pam) <-paste0("k_", rep(2:13, each = 1))
+cvi_p_L2_pam = sapply(clust.p_L2_pam, cvi, type ="internal")
+
+options(scipen = 999)
+cvi_min = cvi_p_L2_pam[row.names(cvi_p_L2_pam) %in% c('DB', 'DBstar', 'COP'),] %>% 
+  as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
+  pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
+  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', ''))) #%>% 
+  #pivot_wider(names_from = cvi, values_from = index)
+
+ggplot(cvi_min, aes(x = n_clust, y = index)) + 
+  geom_line() + 
+  facet_wrap(~ cvi, scales = "free") +
+  scale_x_continuous(breaks = seq(2, 13, 1)) +
+  theme_minimal()
+
+cvi_max = cvi_p_L2_pam[row.names(cvi_p_L2_pam) %in% c('Sil', 'SF', 'CH', 'D'),] %>% 
+  as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
+  pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
+  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', ''))) #%>% 
+  #pivot_wider(names_from = cvi, values_from = index)
+
+ggplot(cvi_max, aes(x = n_clust, y = index)) + 
+  geom_line() +
+  facet_wrap(~ cvi, scales = "free") +
+  scale_x_continuous(breaks = seq(2, 13, 1)) +
+  theme_minimal()
+
+# !!! No compila debido a las repeticiones
+#names(clust.p_L2_pam2) <-paste0("k_", rep(2:5, each = 8))
+#sapply(clust.p_L2_pam2, cvi, type ="internal")
+
+workers<-makeCluster(8L)
+
+invisible(clusterEvalQ(workers,library("dtwclust")))
+# Registerthebackend;thisstepMUSTbedone
+registerDoParallel(workers)
+
+clust2.p_L2_pam <- tsclust(mtrx.norm, 
+                          type="partitional", 
+                          k=2L, 
+                          distance="L2", window.size = 20L,
+                          centroid="pam",
+                          seed = 42,
+                          control = partitional_control(nrep = 4L))
+stopCluster(workers)
+# Gobacktosequentialcomputation
+registerDoSEQ()
+
+
+names(clust2.p_L2_pam) <-paste0("r_", 1L:4L)
+clust2.p_L2_pam_ <- cl_ensemble(list = clust2.p_L2_pam)
+cl_dissimilarity(clust2.p_L2_pam_)
+
+# !!! No funciona
+#table(Medoid = cl_class_ids(cl_medoid(clust2.p_L2_pam)),
+#      "True Classes"= rep(c(2L, 1L), each= 4L))
+
+## 4.2 Simple partitional clustering with dtw distance and PAM centroids ----
+## sugiere 2 o 5 grupos
+# type="partitional", k=2L:17L, distance="dtw", centroid="pam"
+
+workers<-makeCluster(8L)
+
+invisible(clusterEvalQ(workers,library("dtwclust")))
+# Registerthebackend;thisstepMUSTbedone
+registerDoParallel(workers)
+
+# con distance="dtw" In distfun(x = x, centroids = centroids, window.size = window.size) :
+# Package 'bigmemory' is not available, cannot parallelize computation with 'dtw'. Use options(dtwclust_suggest_bigmemory = FALSE) to avoid this warning.
+options(dtwclust_suggest_bigmemory = FALSE)
+
+clust.p_dtw_pam <- tsclust(mtrx.norm, 
+                           type="partitional", 
+                           k=2L:13L, 
+                           distance="dtw", window.size = 20L,
+                           centroid="pam")#,
+                           #control = partitional_control(nrep = 4L))
+
+names(clust.p_dtw_pam) <-paste0("k_", rep(2:13, each = 1))
+cvi_p_dtw_pam = sapply(clust.p_dtw_pam, cvi, type ="internal")
+
+stopCluster(workers)
+# Gobacktosequentialcomputation
+registerDoSEQ()
+
+cvi_min = cvi_p_dtw_pam[row.names(cvi_p_dtw_pam) %in% c('DB', 'DBstar', 'COP'),] %>% 
+  as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
+  pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
+  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', ''))) #%>% 
+#pivot_wider(names_from = cvi, values_from = index)
+
+ggplot(cvi_min, aes(x = n_clust, y = index)) + 
+  geom_line() + 
+  facet_wrap(~ cvi, scales = "free") + 
+  scale_x_continuous(breaks = seq(2, 13, 1)) +
+  theme_minimal()
+
+cvi_max = cvi_p_dtw_pam[row.names(cvi_p_dtw_pam) %in% c('Sil', 'SF', 'CH', 'D'),] %>% 
+  as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
+  pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
+  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', ''))) #%>% 
+#pivot_wider(names_from = cvi, values_from = index)
+
+ggplot(cvi_max, aes(x = n_clust, y = index)) + 
+  geom_line() + 
+  facet_wrap(~ cvi, scales = "free") +
+  scale_x_continuous(breaks = seq(2, 13, 1)) +
+  theme_minimal()
+
+workers<-makeCluster(8L)
+
+invisible(clusterEvalQ(workers,library("dtwclust")))
+# Registerthebackend;thisstepMUSTbedone
+registerDoParallel(workers)
+
+clust5.p_dtw_pam <- tsclust(mtrx.norm, 
+                            type="partitional", 
+                            k=5L, 
+                            distance="dtw", window.size = 20L,
+                            centroid="pam",
+                            seed = 42,
+                            control = partitional_control(nrep = 4L))
+stopCluster(workers)
+# Gobacktosequentialcomputation
+registerDoSEQ()
+
+names(clust5.p_dtw_pam) <-paste0("r_", 1L:4L)
+clust5.p_dtw_pam_ <- cl_ensemble(list = clust5.p_dtw_pam)
+cl_dissimilarity(clust5.p_dtw_pam_)
+
+# !!! No funciona
+#table(Medoid = cl_class_ids(cl_medoid(clust5.p_dtw_pam_)),
+#      "True Classes"= rep(c(5L, 4L, 3L, 2L, 1L), each= 4L))
+
+## 4.3 Hierarchical clustering with Euclidean distance and PAM centroids -------
+# type = "hierarchical", distance = "L2", centroid = "pam"
+
+cvi_p_L2_pam_rep = sapply(clust2.p_L2_pam, cvi, type = 'internal')
+cvi_mean_p_L2_pam = apply(cvi_p_L2_pam_rep, MARGIN = 1, mean) # promedio métricas
+
+# por votación se queda con la réplica 3 de mejor desempeño
+sapply(row.names(cvi_p_L2_pam_rep), function(x) {
+  if(x %in% cols_max){
+    which.max(cvi_p_L2_pam_rep[row.names(cvi_p_L2_pam_rep)==x,])
+  }else{
+    which.min(cvi_p_L2_pam_rep[row.names(cvi_p_L2_pam_rep)==x,])
+  }
+})
+
+workers<-makeCluster(8L)
+
+invisible(clusterEvalQ(workers,library("dtwclust")))
+# Registerthebackend;thisstepMUSTbedone
+registerDoParallel(workers)
+
+hclust_methods<-c("single","complete", "average", "mcquitty")
+clust.h_L2_pam <- tsclust(mtrx.norm, 
+                          type="hierarchical", 
+                          k=2L, 
+                          #control=hierarchical_control(method = "average"))
+                          control = hierarchical_control(method =  hclust_methods,
+                                                         distmat = clust2.p_L2_pam[[3L]]@distmat))
+                          
+stopCluster(workers)
+# Gobacktosequentialcomputation
+registerDoSEQ()
+
+cvi_h_L2_pam = sapply(clust.h_L2_pam, cvi, type = 'internal')
+
+col_min = c('DB', 'DBstar', 'COP')
+cvi_min = cvi_h_L2_pam[row.names(cvi_h_L2_pam) %in% col_min,] %>% 
+  as.data.frame() %>% `colnames<-`(paste0('h_',hclust_methods)) %>% 
+  mutate(cvi = row.names(.)) %>% 
+  pivot_longer(cols = starts_with('h_'), names_to = "h_method", values_to = "index") %>% 
+  pivot_wider(names_from = cvi, values_from = index)
+
+# average | average | single
+sapply(col_min, function(x) {
+  cvi_min$h_method[cvi_min[,x] == max(cvi_min[,x])]
+})
+
+cols_max = c('Sil', 'SF', 'CH', 'D')
+cvi_max = cvi_h_L2_pam[row.names(cvi_h_L2_pam) %in% cols_max,] %>% 
+  as.data.frame() %>% `colnames<-`(paste0('h_', hclust_methods)) %>% 
+  mutate(cvi = row.names(.)) %>% 
+  pivot_longer(cols = starts_with('h_'), names_to = "h_method", values_to = "index") %>% 
+  pivot_wider(names_from = cvi, values_from = index)
+
+# complete | complete | average | single
+sapply(cols_max, function(x) {
+  cvi_max$h_method[cvi_max[,x] == max(cvi_max[,x])]
+})
+
+# fit hierarchical average con misma distancia L2
+# por mayor votación (3) se elige "average"
+clust.h_avg_L2_pam <- tsclust(mtrx.norm, 
+                              type="hierarchical", 
+                              k=2L, 
+                              control = hierarchical_control(method = "average",
+                                                             distmat = clust2.p_L2_pam[[3L]]@distmat))
+
+# el método "single" da resultados desproporcionados, casi todos a un cluster
+plot(clust.h_avg_L2_pam) # gráfico dendograma
+table(cutree(clust.h_avg_L2_pam, k =2))
+
+# Error >> por lo que cvi es de la partición anterior
+#cvi_h_avg_L2_pam = sapply(clust.h_avg_L2_pam, cvi, type = 'internal')
+
+# compara con los valores de Simple partitional
+df_L2_pam = cvi_h_L2_pam %>% 
+  as.data.frame() %>% `colnames<-`(paste0('h_',hclust_methods)) %>% 
+  dplyr::select('h_average') %>% 
+  bind_cols(as.data.frame(cvi_mean_p_L2_pam))
+
+# por votación se queda con el promedio de las réplicas de partitional - L2 - pam
+sapply(row.names(df_L2_pam), function(x) {
+  if(x %in% cols_max){
+    which.max(df_L2_pam[row.names(df_L2_pam)==x,])
+  }else{
+    which.min(df_L2_pam[row.names(df_L2_pam)==x,])
+  }
+})
+
+# crea la columna con las etiquetas del clustering
+idx_medoid = cl_class_ids(cl_medoid(clust2.p_L2_pam))
+# se elige la réplica 3 por tener las mejores cvi
+idx_r3 = cl_class_ids(clust2.p_L2_pam$r_3)
+
+plot(clust2.p_L2_pam$r_3, type = "sc")
+plot(clust2.p_L2_pam$r_3, type = "centroids")
+
+df_pcp_monthly_normal3 = df_pcp_monthly_normal %>% ungroup() %>% 
+  mutate(clust2 = factor(cl_class_ids(clust2.p_L2_pam$r_3)))
+
+df_p_l2_pam_pivot_longer <- df_pcp_monthly_normal3 %>% 
+  pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
+  mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
+
+df_pcp_monthly_normal3 = st_as_sf(df_pcp_monthly_normal3, 
+                                  coords = c('X', 'Y'),
+                                  crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+map2 <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_pcp_monthly_normal3, 'Cluster'=clust2), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))
+
+bx2_p_l2_pam <- ggplot(rename(df_p_l2_pam_pivot_longer, 'Cluster'=clust2), 
+                       aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal() +
+  theme(legend.position = c(0.9, 0.9))+
+  labs(y = "Normal precipitación mensual")
+
+grid.arrange(map2, bx2_p_l2_pam, ncol = 2)
+
+pct2_p_L2_pam <- df_pcp_monthly_normal3 %>% 
+  count(clust2) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust2)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+#save.image('clust_sttns_tsclust.RData')
+load('clust_sttns_tsclust.RData')
+
+## 4.4 Hierarchical clustering with dtw distance -----------------------------
+# type = "h", k = 6L, distance = "dtw"
+
+cvi_p_dtw_pam_rep = sapply(clust5.p_dtw_pam, cvi, type = 'internal')
+cvi_mean_p_dtw_pam = apply(cvi_p_dtw_pam_rep, MARGIN = 1, mean) # promedio métricas
+
+# por votación se queda con la réplica 4 de mejor desempeño
+sapply(row.names(cvi_p_dtw_pam_rep), function(x) {
+  if(x %in% cols_max){
+    which.max(cvi_p_dtw_pam_rep[row.names(cvi_p_dtw_pam_rep)==x,])
+  }else{
+    which.min(cvi_p_dtw_pam_rep[row.names(cvi_p_dtw_pam_rep)==x,])
+  }
+})
+
+workers<-makeCluster(8L)
+
+invisible(clusterEvalQ(workers,library("dtwclust")))
+# Registerthebackend;thisstepMUSTbedone
+registerDoParallel(workers)
+
+clust.h_dtw_pam <- tsclust(mtrx.norm, 
+                           type="hierarchical",
+                           k = 5L, 
+                           distance = "dtw",
+                           control = hierarchical_control(method =  hclust_methods,
+                                                          distmat = clust5.p_dtw_pam[[4L]]@distmat))
+
+stopCluster(workers)
+# Gobacktosequentialcomputation
+registerDoSEQ()
+
+cvi_h_dtw_pam = sapply(clust.h_dtw_pam, cvi, type = 'internal')
+
+cvi_min = cvi_h_dtw_pam[row.names(cvi_h_dtw_pam) %in% col_min,] %>% 
+  as.data.frame() %>% `colnames<-`(paste0('h_',hclust_methods)) %>% 
+  mutate(cvi = row.names(.)) %>% 
+  pivot_longer(cols = starts_with('h_'), names_to = "h_method", values_to = "index") %>% 
+  pivot_wider(names_from = cvi, values_from = index)
+
+# complete | complete | single
+sapply(col_min, function(x) {
+  cvi_min$h_method[cvi_min[,x] == max(cvi_min[,x])]
+})
+
+cvi_max = cvi_h_dtw_pam[row.names(cvi_h_dtw_pam) %in% cols_max,] %>% 
+  as.data.frame() %>% `colnames<-`(paste0('h_', hclust_methods)) %>% 
+  mutate(cvi = row.names(.)) %>% 
+  pivot_longer(cols = starts_with('h_'), names_to = "h_method", values_to = "index") %>% 
+  pivot_wider(names_from = cvi, values_from = index)
+
+# average | single | complete | single
+sapply(cols_max, function(x) {
+  cvi_max$h_method[cvi_max[,x] == max(cvi_max[,x])]
+})
+
+# fit hierarchical average con misma distancia dtw
+# por mayor votación (3) se elige "complete"
+clust.h_cmplt_L2_pam <- tsclust(mtrx.norm, 
+                                type="hierarchical", 
+                                k=5L, 
+                                control = hierarchical_control(method = "complete",
+                                                               distmat = clust5.p_dtw_pam[[4L]]@distmat))
+
+# el método "single" da resultados desproporcionados, casi todos a un cluster
+plot(clust.h_cmplt_L2_pam) # gráfico dendograma
+table(cutree(clust.h_cmplt_L2_pam, k =5))
+
+# Error >> por lo que cvi es de la partición anterior
+#cvi_h_cmplt_L2_pam = sapply(clust.h_cmplt_L2_pam, cvi, type = 'internal')
+
+# compara con los valores de Simple partitional
+df_dtw_pam = cvi_h_dtw_pam %>% 
+  as.data.frame() %>% `colnames<-`(paste0('h_',hclust_methods)) %>% 
+  dplyr::select('h_complete') %>% 
+  bind_cols(as.data.frame(cvi_mean_p_dtw_pam))
+
+# por votación se queda con el promedio de las réplicas de partitional - dtw - pam
+sapply(row.names(df_dtw_pam), function(x) {
+  if(x %in% cols_max){
+    which.max(df_dtw_pam[row.names(df_dtw_pam)==x,])
+  }else{
+    which.min(df_dtw_pam[row.names(df_dtw_pam)==x,])
+  }
+})
+
+# crea la columna con las etiquetas del clustering
+idx_medoid = cl_class_ids(cl_medoid(clust5.p_dtw_pam))
+# se elige la réplica 3 por tener las mejores cvi
+idx_r4 = cl_class_ids(clust5.p_dtw_pam$r_4)
+
+plot(clust5.p_dtw_pam$r_4, type = "sc")
+plot(clust5.p_dtw_pam$r_4, type = "centroids")
+
+df_pcp_monthly_normal4 = df_pcp_monthly_normal %>% ungroup() %>% 
+  mutate(clust5 = factor(cl_class_ids(clust5.p_dtw_pam$r_4)))
+
+df_p_dtw_pam_pivot_longer <- df_pcp_monthly_normal4 %>% 
+  pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
+  mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
+
+df_pcp_monthly_normal4 = st_as_sf(df_pcp_monthly_normal4, 
+                                  coords = c('X', 'Y'),
+                                  crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+map5 <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_pcp_monthly_normal4, 'Cluster'=clust5), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))
+
+bx5_p_dtw_pam <- ggplot(rename(df_p_dtw_pam_pivot_longer, 'Cluster'=clust5), 
+                        aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal() +
+  theme(legend.position = c(0.9, 0.9))+
+  labs(y = "Normal precipitación mensual")
+
+grid.arrange(map5, bx5_p_dtw_pam, ncol = 2)
+
+pct5_p_dtw_pam <- df_pcp_monthly_normal4 %>% 
+  count(clust5) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust5)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+grid.arrange(pct2_p_L2_pam, pct5_p_dtw_pam, ncol = 2,
+             top = textGrob(
+               "Porcentaje de estaciones metereológicas en cada cluster",
+               gp = gpar(fontsize = 16, fontface = "bold")
+             ))
+
+# 5. Hierachical clustering of spatially correlated fd -------------------------
 
 data(CanadianWeather, package="fda")
 str(CanadianWeather, max.level = 1)
 
-# como Longitud de Canada es West, es negativo  
-CanadianWeather$coordinates[,2]=-CanadianWeather$coordinates[,2]
-head(CanadianWeather$coordinates)
+## 4.1 Coordenadas -----------------------------------------------------------
 
-CanadianWeather_planar = matrix(NA, nr=nrow(CanadianWeather$coordinates), nc=2)
+#coords <- spTransform(coords,canada.CRS)
+coords_df <- data.frame(lon = -CanadianWeather$coordinates[, "W.longitude"], 
+                        lat = CanadianWeather$coordinates[, "N.latitude"])
+
+convertlatlong2UTM <- function(area, units = 'm') {
+  # temporary sf conversion
+  area <- sf::st_as_sf(area)
+  bounds <- sf::st_bbox(area)
+  lat = mean(bounds[c(2, 4)]) # latitude
+  long = mean(bounds[c(1, 3)]) # longitude
+  # find UTM hemisphere (latitude)
+  hemisphere <- ifelse(lat > 0, "north", "south")
+  # find UTM zone
+  zone <- (floor((long + 180) / 6) %% 60) + 1
+  crs <- paste0("+proj=utm +zone=", zone, " +datum=WGS84 +ellps=WGS84 +", hemisphere,
+                " +units=", units, " +no_defs")
+  return(crs)
+}
+
+# 0. fda coordinates
+coords0 <- st_as_sf(coords_df, coords = c("lon", "lat"), crs = 4326)  
+XY_m0 <- st_coordinates(coords0)   
+X_m0 <- XY_m0[,1]; Y_m0 <- XY_m0[,2]
+X_km0 <- X_m0/1000; Y_km0 <- Y_m0/1000
+XY_km0 <- matrix(c(X_km0, Y_km0), nc = 2)
+
+# 1. github.com/mpbohorquezc/SpatFD-Functional-Geostatistics/man/sim_functional_process.Rd
+# NO convierte a negativo la longitud
+canada.CRS <- CRS("+init=epsg:4608")
+coords1 <- SpatialPoints(CanadianWeather$coordinates,
+                         proj4string = CRS("+init=epsg:4326"))
+
+coords1 <- spTransform(coords1, canada.CRS) %>% st_as_sf()
+XY_m1 <- st_coordinates(coords1)   
+X_m1 <- XY_m1[,1]; Y_m1 <- XY_m1[,2]
+X_km1 <- X_m1/1000; Y_km1 <- Y_m1/1000
+XY_km1 <- matrix(c(X_km1, Y_km1), nc = 2)
+
+# 2. chatGPT para Canada (epsg:3978)
+coords_sf <- st_as_sf(coords_df, coords = c("lon", "lat"), crs = 4326)  # WGS84
+coords2 <- st_transform(coords_sf, 3978) 
+XY_m2 <- st_coordinates(coords2)   
+X_m2 <- XY_m2[,1]; Y_m2 <- XY_m2[,2]
+X_km2 <- X_m2/1000; Y_km2 <- Y_m2/1000
+XY_km2 <- matrix(c(X_km2, Y_km2), nc = 2)
+
+# 3. convertlatlong2UTM: coordenadas planas
+CanadianWeather_planar = coords_df
+CanadianWeather$coordinates[,2] = -CanadianWeather$coordinates[,2]
 
 for(i in 1:nrow(CanadianWeather$coordinates)){
   CanadianWeather_planar[i,] = as.data.frame(CanadianWeather$coordinates)[i,] %>%
@@ -649,7 +1454,13 @@ for(i in 1:nrow(CanadianWeather$coordinates)){
     st_transform(crs = convertlatlong2UTM(.)) %>%
     st_coordinates()}
 
-CanadianWeather_planar = as.data.frame(CanadianWeather_planar) %>% `colnames<-`(c("W.longitude", "N.latitude"))
+#CanadianWeather_planar = as.data.frame(CanadianWeather_planar) %>% 
+#  `colnames<-`(c("W.longitude", "N.latitude"))
+
+XY_m3 <- CanadianWeather_planar
+X_m3 <- XY_m3[,1]; Y_m3 <- XY_m3[,2]
+X_km3 <- X_m3/1000; Y_km3 <- Y_m3/1000
+XY_km3 <- matrix(c(X_km3, Y_km3), nc = 2)
 
 # Smooth temp values using a Fourier basis with 65 functions 
 nbasis <- 65
@@ -666,66 +1477,243 @@ plot(Temp.fd)
 #
 #plot(Temp.fd)
 
-# Remover la tendencia espacial con el modelo de regresión funcional 
+
+#coord = as.data.frame(CanadianWeather$coordinates)
+#fRegress(CanadianWeather$coordinates)
+#coords = as.data.frame(coords)
+
+## 4.2 Remover la tendencia espacial con el modelo de regresión funcional ------
 ## X_i(t) = \alpha(t) + \beta_1(t) Longitude_i + \beta_2(t) Latitude_i + e_i (t)
 
-coord = as.data.frame(CanadianWeather$coordinates)
-names(coord)
-fRegress(CanadianWeather$coordinates)
+#TempRgn.f <- fRegress(Temp.fd ~ N.latitude + W.longitude , coord)
+TempRgn.fm0 <- fRegress(Temp.fd ~ X_m0 + X_m0)
+TempRgn.fkm0 <- fRegress(Temp.fd ~ X_km0 + X_km0)
 
-TempRgn.f <- fRegress(Temp.fd ~ N.latitude + W.longitude , coord)
+TempRgn.fm1 <- fRegress(Temp.fd  ~ X_m1 + X_m1)
+TempRgn.fkm1 <- fRegress(Temp.fd  ~ X_km1 + X_km1)
+
+TempRgn.fm2 <- fRegress(Temp.fd ~ X_m2 + X_m2) # !!! In eigchk(Cmat) : Near singularity in coefficient matrix.
+TempRgn.fkm2 <- fRegress(Temp.fd ~ X_km2 + X_km2)
+
+TempRgn.fm3 <- fRegress(Temp.fd ~ X_m3 + X_m3) # !!! In eigchk(Cmat) : Near singularity in coefficient matrix.
+TempRgn.fkm3 <- fRegress(Temp.fd ~ X_km3 + X_km3)
+#TempRgn.f <- fRegress(Temp.fd ~ coords.x1 + coords.x2 , coords)
 #TempRgn.f2 <- fRegress(Temp.fd ~ N.latitude + W.longitude , CanadianWeather_planar)
+
+## 4.3 Obtiene los residuales del modelo funcional -----------------------------
+
 #fdobj.res = TempRgn.f$yfdobj-TempRgn.f$yhatfdobj
-fdobj.res = Temp.fd-TempRgn.f$yhatfdobj
-plot(fdobj.res)
+#fdobj.res = Temp.fd-TempRgn.f$yhatfdobj
+fdobj.res_m0 = Temp.fd-TempRgn.fm0$yhatfdobj
+fdobj.res_km0 = Temp.fd-TempRgn.fkm0$yhatfdobj
+
+fdobj.res_m1 = Temp.fd-TempRgn.fm1$yhatfdobj
+fdobj.res_km1 = Temp.fd-TempRgn.fkm1$yhatfdobj
+
+fdobj.res_m2 = Temp.fd-TempRgn.fm2$yhatfdobj
+fdobj.res_km2 = Temp.fd-TempRgn.fkm2$yhatfdobj
+
+fdobj.res_m3 = Temp.fd-TempRgn.fm3$yhatfdobj
+fdobj.res_km3 = Temp.fd-TempRgn.fkm3$yhatfdobj
+
+plot(fdobj.res_m0)
 #summary(TempRgn.f)
-fdobj.res
 
 # evalua los residuales
 day_grid <- 1:365
-res_M <- eval.fd(day_grid, fdobj.res)
+res_m0 <- eval.fd(day_grid, fdobj.res_m0)
+res_km0 <- eval.fd(day_grid, fdobj.res_km0)
 
+res_m1 <- eval.fd(day_grid, fdobj.res_m1)
+res_km1 <- eval.fd(day_grid, fdobj.res_km1)
 
+res_m2 <- eval.fd(day_grid, fdobj.res_m2)
+res_km2 <- eval.fd(day_grid, fdobj.res_km2)
+
+res_m3 <- eval.fd(day_grid, fdobj.res_m3)
+res_km3 <- eval.fd(day_grid, fdobj.res_km3)
+
+## 4.4 Ajusta la función okfd -------------------------------------------------
 # Fit a spherical model to the estimated trace-variogram by using the OLS technique
-coords.cero <- data.frame(Lon = -64.06, Lat = 45.79)
+coords.cero <- data.frame(Lon = -64.06, Lat = 44.79)
 
-okfd.res <- okfd(new.coords = coords.cero, coords=coord,
-                 data=res_M, smooth.type='fourier', nbasis=65, argvals=day.5,
-                 fix.nugget=FALSE, fix.kappa=FALSE)
+okfd.res_m0 <- okfd(new.coords = coords.cero, coords=XY_m0,
+                    data=res_m0, 
+                    smooth.type='fourier', nbasis=65, argvals=day.5,
+                    fix.nugget=FALSE, fix.kappa=FALSE)
 
-okfd.res$trace.vari.array[[1]] # 8034.03 y 22.08
+okfd.res_m0$trace.vari.array[[1]] # spherical: 40751.21 y 25.44
+
+okfd.res_km0 <- okfd(new.coords = coords.cero, coords=XY_km0,
+                    data=res_km0, 
+                    smooth.type='fourier', nbasis=65, argvals=day.5,
+                    fix.nugget=FALSE, fix.kappa=FALSE)
+
+okfd.res_km0$trace.vari.array[[1]] # spherical: 4.537189e+04 y 2.873431e-02
+
+okfd.res_m1 <- okfd(new.coords = coords.cero, coords=XY_m1,
+                    data=res_m1, 
+                    smooth.type='fourier', nbasis=65, argvals=day.5,
+                    fix.nugget=TRUE, nugget = 0, fix.kappa=FALSE)
+
+okfd.res_m1$trace.vari.array[[1]] # spherical: 16533.4686  y 65.1114
+
+okfd.res_km1 <- okfd(new.coords = coords.cero, coords=XY_km1,
+                    data=res_km1, 
+                    smooth.type='fourier', nbasis=65, argvals=day.5,
+                    fix.nugget=TRUE, nugget = 0, fix.kappa=FALSE)
+
+okfd.res_km1$trace.vari.array[[1]] # spherical: 1.860350e+04 y 6.161156e-02
+
+okfd.res_m2 <- okfd(new.coords = coords.cero, coords=XY_m2,
+                    data=res_m2, 
+                    smooth.type='fourier', nbasis=65, argvals=day.5,
+                    fix.nugget=FALSE, fix.kappa=FALSE)
+
+okfd.res_m2$trace.vari.array[[1]] # spherical: 43814 y 2674732
+
+okfd.res_km2 <- okfd(new.coords = coords.cero, coords=XY_km2,
+                     data=res_km2, 
+                     smooth.type='fourier', nbasis=65, argvals=day.5,
+                     fix.nugget=TRUE, nugget = 0, fix.kappa=FALSE)
+
+okfd.res_km2$trace.vari.array[[1]] # spherical: 1.860350e+04 y 6.161156e-02
+
+okfd.res_m3 <- okfd(new.coords = coords.cero, coords=XY_m3,
+                    data=res_m3, 
+                    smooth.type='fourier', nbasis=65, argvals=day.5,
+                    fix.nugget=FALSE, fix.kappa=FALSE)
+
+okfd.res_m3$trace.vari.array[[1]] # spherical: 43814 y 2674732
+
+okfd.res_km3 <- okfd(new.coords = coords.cero, coords=XY_km3,
+                    data=res_km3, 
+                    smooth.type='fourier', nbasis=65, argvals=day.5,
+                    fix.nugget=FALSE, fix.kappa=FALSE)
+
+okfd.res_km3$trace.vari.array[[1]] # spherical: 43814 y 2674732
+
+
+okfd.res$trace.vari.array[[1]] # spherical: 8034.03 y 22.08
 okfd.res$trace.vari.array[[4]] # 8034.03 y 22.08
 
 plot(okfd.res)
 
-M <- fourierpen(fdobj.res$basis,  Lfdobj=0)
+## 4.5 Ajusta la función fit.tracevariog --------------------------------------
+M0 <- fourierpen(fdobj.res_m0$basis,  Lfdobj=0)
+res.fd_m0 <- smooth.basis(argvals = 1:365, y = res_m0, fdParobj = Temp.basis)$fd
+L2norm = l2.norm(ncol(fdobj.res_m0$coefs), res.fd_m0, M0)
 
-res.fd <- smooth.basis(argvals = 1:365, y = res_M, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res$coefs), res.fd, M)
+new.emp.trace.vari_m0 <- trace.variog(coords=XY_m0,
+                                      L2norm=L2norm, bin=FALSE)
 
-new.emp.trace.vari1 <- trace.variog(coords=coord,
-                                    L2norm=L2norm, bin=FALSE)
+fit_m0 = geofd::fit.tracevariog(new.emp.trace.vari_m0, models = "spherical",
+                                sigma2.0 = 15000, phi.0 = 250,
+                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
+                                max.dist.variogram=NULL)
 
-new.emp.trace.vari2 <- trace.variog(coords=CanadianWeather_planar,
-                                    L2norm=L2norm, bin=FALSE)
+fit_m0$best$cov.pars # 40750.55, 25.44
 
-fit1 = geofd::fit.tracevariog(new.emp.trace.vari1, models = "spherical",
-                              sigma2.0 = 7769, phi.0 = 21,
-                              fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                              max.dist.variogram=NULL)
+kM0 <- fourierpen(fdobj.res_km0$basis,  Lfdobj=0)
+res.fd_km0 <- smooth.basis(argvals = 1:365, y = res_km0, fdParobj = Temp.basis)$fd
+L2norm = l2.norm(ncol(fdobj.res_km0$coefs), res.fd_km0, kM0)
 
-fit2 = geofd::fit.tracevariog(new.emp.trace.vari2, models = "spherical",
-                              sigma2.0 = 9000, phi.0 = 2200,
-                              fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                              max.dist.variogram=NULL)
+new.emp.trace.vari_km0 <- trace.variog(coords=XY_km0,
+                                       L2norm=L2norm, bin=FALSE)
 
+fit_km0 = geofd::fit.tracevariog(new.emp.trace.vari_km0, models = "spherical",
+                                sigma2.0 = 15000, phi.0 = 250,
+                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
+                                max.dist.variogram=NULL)
 
-fit1$best$cov.pars # 8033, 22.08
-fit2$best$cov.pars # 6975, 22.08
+fit_km0$best$cov.pars # 2.356310e+04 y 1.807513e-02
+
+M1 <- fourierpen(fdobj.res_m1$basis,  Lfdobj=0)
+res.fd_m1 <- smooth.basis(argvals = 1:365, y = res_m1, fdParobj = Temp.basis)$fd
+L2norm = l2.norm(ncol(fdobj.res_m1$coefs), res.fd_m1, M1)
+
+new.emp.trace.vari_m1 <- trace.variog(coords=XY_m1,
+                                      L2norm=L2norm, bin=FALSE)
+
+fit_m1 = geofd::fit.tracevariog(new.emp.trace.vari_m1, models = "spherical",
+                                sigma2.0 = 16500, phi.0 = 66,
+                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
+                                max.dist.variogram=NULL)
+
+fit_m1$best$cov.pars # 8033, 22.08
+
+kM1 <- fourierpen(fdobj.res_km1$basis,  Lfdobj=0)
+res.fd_km1 <- smooth.basis(argvals = 1:365, y = res_km1, fdParobj = Temp.basis)$fd
+L2norm = l2.norm(ncol(fdobj.res_km1$coefs), res.fd_km1, kM1)
+
+new.emp.trace.vari_km1 <- trace.variog(coords=XY_km1,
+                                       L2norm=L2norm, bin=FALSE)
+
+fit_km1 = geofd::fit.tracevariog(new.emp.trace.vari_km1, models = "spherical",
+                                 sigma2.0 = 15000, phi.0 = 250,
+                                 fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
+                                 max.dist.variogram=NULL)
+
+fit_km1$best$cov.pars # 1.835429e+04  y 6.079655e-02
+
+M2 <- fourierpen(fdobj.res_m2$basis,  Lfdobj=0)
+res.fd_m2 <- smooth.basis(argvals = 1:365, y = res_m2, fdParobj = Temp.basis)$fd
+L2norm = l2.norm(ncol(fdobj.res_m2$coefs), res.fd_m2, M2)
+
+new.emp.trace.vari_m2 <- trace.variog(coords=XY_m2,
+                                      L2norm=L2norm, bin=FALSE)
+
+fit_m2 = geofd::fit.tracevariog(new.emp.trace.vari_m2, models = "spherical",
+                                sigma2.0 = 16500, phi.0 = 66,
+                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
+                                max.dist.variogram=NULL)
+
+fit_m2$best$cov.pars # 8033, 22.08
+
+kM2 <- fourierpen(fdobj.res_km2$basis,  Lfdobj=0)
+res.fd_km2 <- smooth.basis(argvals = 1:365, y = res_km2, fdParobj = Temp.basis)$fd
+L2norm = l2.norm(ncol(fdobj.res_km2$coefs), res.fd_km2, kM2)
+
+new.emp.trace.vari_km2 <- trace.variog(coords=XY_km2,
+                                       L2norm=L2norm, bin=FALSE)
+
+fit_km2 = geofd::fit.tracevariog(new.emp.trace.vari_km2, models = "spherical",
+                                 sigma2.0 = 15000, phi.0 = 250,
+                                 fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
+                                 max.dist.variogram=NULL)
+
+fit_km2$best$cov.pars # 1.835429e+04  y 6.079655e-02
+
+M3 <- fourierpen(fdobj.res_m3$basis,  Lfdobj=0)
+res.fd_m3 <- smooth.basis(argvals = 1:365, y = res_m3, fdParobj = Temp.basis)$fd
+L2norm = l2.norm(ncol(fdobj.res_m3$coefs), res.fd_m3, M3)
+
+new.emp.trace.vari_m3 <- trace.variog(coords=XY_m3,
+                                      L2norm=L2norm, bin=FALSE)
+
+fit_m3 = geofd::fit.tracevariog(new.emp.trace.vari_m3, models = "spherical",
+                                sigma2.0 = 16500, phi.0 = 100,
+                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
+                                max.dist.variogram=NULL)
+
+fit_m3$best$cov.pars # 8033, 22.08
+
+kM3 <- fourierpen(fdobj.res_km3$basis,  Lfdobj=0)
+res.fd_km3 <- smooth.basis(argvals = 1:365, y = res_km3, fdParobj = Temp.basis)$fd
+L2norm = l2.norm(ncol(fdobj.res_km3$coefs), res.fd_km3, kM3)
+
+new.emp.trace.vari_km3 <- trace.variog(coords=XY_km3,
+                                       L2norm=L2norm, bin=FALSE)
+
+fit_km3 = geofd::fit.tracevariog(new.emp.trace.vari_km3, models = "spherical",
+                                 sigma2.0 = 15000, phi.0 = 250,
+                                 fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
+                                 max.dist.variogram=NULL)
+
+fit_km3$best$cov.pars # 4371399.4  y 165403.4
 
 
 plot(new.emp.trace.vari1$u, new.emp.trace.vari1$v)
-
 
 # Ejemplo geofd: An R Package for Function-Valued Geostatistical Prediction ----
 data(maritimes.coords)
