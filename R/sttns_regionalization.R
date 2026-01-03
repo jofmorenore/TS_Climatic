@@ -1,3 +1,4 @@
+
 library(dplyr)
 library(lubridate)
 library(factoextra)
@@ -53,17 +54,30 @@ shp_depto <- st_read("Departamentos202208_shp/Depto.shp")
 
 # crea variable escalada
 df_pcp_annual_mean$pcp_scaled = scale(df_pcp_annual_mean$`mean(annual_pcp)`) 
+
+c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF")
+c("#F8766D", "#A3A500", "#00BF7D", "#00B0F6", "#FB61D7")
+
+#scale_shape_manual(values=c(3, 16, 17))+
+#scale_color_manual(values=c('#999999','#E69F00', '#56B4E9'))+
+
 #write.table(df_pcp_annual_mean, '~/df_pcp_annual_mean.csv', sep = ',', col.names = T, row.names = F)
 # 1. K-means -------------------------------------------------------------------
 
 # Wss
 fnb1 <- fviz_nbclust(df_pcp_annual_mean$pcp_scaled, FUN = kmeans, method = "wss") +
-  geom_hline(yintercept = km_list[[4]]$tot.withinss, linetype = 2) 
+  geom_hline(yintercept = km_list[[4]]$tot.withinss, linetype = 2) +
+  my_theme_bx()+
+  theme(axis.text = element_text(size = 16),
+        axis.text.x = element_text(size = 16))
 
   # de 3  a 4 grupos
 # Silhouette
 fnb2 <- fviz_nbclust(df_pcp_annual_mean$pcp_scaled, FUN = kmeans, 
-                     method = "silhouette", k.max = 20) # 2 o 3 grupos
+                     method = "silhouette", k.max = 20) + 
+  my_theme_bx()+
+  theme(axis.text = element_text(size = 16),
+        axis.text.x = element_text(size = 16)) # 2 o 3 grupos
 # gap_stat
 # compute gap statistic
 set.seed(12)
@@ -74,7 +88,10 @@ print(gap_stat, method = "firstmax")
 set.seed(12)
 fnb3 <- fviz_nbclust(df_pcp_annual_mean$pcp_scaled, FUN = kmeans, method = "gap_stat", k.max = 20) + 
   geom_hline(yintercept = 0.81, linetype = 2) +
-  coord_cartesian(xlim = c(1.75,20)) # 2, 13 o 16 grupos
+  coord_cartesian(xlim = c(1.75,20))+
+  my_theme_bx()+
+  theme(axis.text = element_text(size = 16),
+        axis.text.x = element_text(size = 16)) # 2, 13 o 16 grupos
 
 grid.arrange(fnb1, fnb2, fnb3, ncol = 3)
 
@@ -102,55 +119,103 @@ df_km_pcp_annual_mean = st_as_sf(df_pcp_annual_mean,
                                  coords = c('X', 'Y'),
                                  crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
 
+my_theme <- function() {
+  theme(
+    legend.position = c(0.9, 0.9),
+    axis.text = element_text(size = 24),
+    axis.text.x = element_text(size = 24, hjust = 1, angle = 90),
+    axis.title = element_text(size = 24),
+    legend.text = element_text(size = 24),
+    legend.title = element_text(size = 24)
+  )
+}
+
 map2 <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
   geom_sf(data = rename(df_km_pcp_annual_mean, 'Cluster'=clust2), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(16, 17))+
+  scale_color_manual(values=c("#00BFC4", "#F8766D"))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
+  my_theme()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
 
 map4 <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
   geom_sf(data = rename(df_km_pcp_annual_mean, 'Cluster'=clust4), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(16, 17, 18,4))+
+  scale_color_manual(values=c("#00BFC4", "#F8766D", "#A3A500", "#C77CFF" ))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
+  my_theme()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
 
 map13 <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
   geom_sf(data = rename(df_km_pcp_annual_mean, 'Cluster'=clust13) , 
           aes(fill = Cluster, pch= Cluster, color = Cluster), size = 1, stroke = 1) +
-  scale_shape_manual(values = c(0:5, 0:6))+
+  scale_shape_manual(values = c(8, 6, 18, 4, 
+                                15, 16, 
+                                3, 10, 
+                                17, 0, 1, 2, 5))+
+  scale_color_manual(values=c("#C77CFF","#Ffa500","#A3A500", 
+                              "#D12405", "#39B600", "#00BFC4",
+                             "#FF62BC", "#000000","#F8766D", 
+                             "#C0C0C0", "#619CFF", "#C2E5EB", "#CD7F32"))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.8))
+  my_theme()+
+  theme(legend.position = c(0.9, 0.8))+
+  guides(color = guide_legend(override.aes = list(size = 4), ncol = 2),
+         shape = guide_legend(ncol = 2))
+
 
 fviz_cluster(km_list[[4]], 
              data = dplyr::select(df_pcp_annual_mean, X, Y))
 
+my_theme_bx <- function(){
+  theme(
+    legend.position = c(0.9, 0.9),
+    axis.text = element_text(size = 24),
+    axis.text.x = element_text(size = 24),
+    axis.title = element_text(size = 24),
+    legend.text = element_text(size = 24),
+    legend.title = element_text(size = 24)
+  )
+}
+
 bx2 <- ggplot(rename(df_km_pcp_annual_mean, 'Cluster'=clust2), 
               aes(x = Cluster, y = `mean(annual_pcp)`, fill = Cluster)) +
   geom_boxplot() + 
+  scale_fill_manual(values=c("#00BFC4", "#F8766D"))+
   scale_y_continuous(breaks = seq(0, 13000, 2000)) +
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Precipitación anual media")
+  labs(y = "Precipitación anual media") +
+  my_theme_bx()
 
 bx4 <- ggplot(rename(df_km_pcp_annual_mean, 'Cluster'=clust4), 
               aes(x = Cluster, y = `mean(annual_pcp)`, fill = Cluster)) +
-  geom_boxplot() + 
+  geom_boxplot() +
+  scale_fill_manual(values=c("#00BFC4", "#F8766D", "#A3A500", "#C77CFF"))+
   scale_y_continuous(breaks = seq(0, 13000, 2000)) +
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Precipitación anual media")
+  labs(y = "Precipitación anual media")+
+  my_theme_bx()
 
 bx13 <- ggplot(rename(df_km_pcp_annual_mean, 'Cluster'=clust13), 
               aes(x = Cluster, y = `mean(annual_pcp)`, fill = Cluster)) +
   geom_boxplot() + 
+  scale_fill_manual(values=c("#C77CFF","#Ffa500","#A3A500", 
+                             "#D12405", "#39B600", "#00BFC4",
+                             "#FF62BC", "#000000","#F8766D", 
+                             "#C0C0C0", "#619CFF", "#C2E5EB", "#CD7F32"))+
   scale_y_continuous(breaks = seq(0, 13000, 2000)) +
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.8))+
-  labs(y = "Precipitación anual media")
-
+  labs(y = "Precipitación anual media")+
+  my_theme_bx()+
+  theme(legend.position = c(0.9, 0.7))+
+  guides(color = guide_legend(ncol = 2),
+         shape = guide_legend(ncol = 2))
+  
 grid.arrange(map2, bx2, ncol = 2)
 table(df_km_pcp_annual_mean$clust4, df_km_pcp_annual_mean$clust2)
 grid.arrange(map4, bx4, ncol = 2)
@@ -165,11 +230,15 @@ pct2_ <- df_km_pcp_annual_mean %>%
   coord_polar(theta = "y") +
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
+            fontface = "bold", size = 5, color = "white") +
+  scale_fill_manual(values=c("#00BFC4", "#F8766D"))+
   labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(
+    legend.text = element_text(size = 24),
+    legend.title = element_text(size = 24))
+
 
 pct4_ <- df_km_pcp_annual_mean %>% 
   count(clust4) %>%
@@ -180,12 +249,14 @@ pct4_ <- df_km_pcp_annual_mean %>%
   coord_polar(theta = "y") +
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
-  labs(title = "Porcentaje de estaciones metereológicas en cada cluster",
-       fill = "Cluster") +
+            fontface = "bold", size = 5, color = "white") +
+  scale_fill_manual(values=c("#00BFC4", "#F8766D", "#A3A500", "#C77CFF"))+
+  labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(
+    legend.text = element_text(size = 24),
+    legend.title = element_text(size = 24))
 
 pct13_ <- df_km_pcp_annual_mean %>% 
   count(clust13) %>%
@@ -196,13 +267,23 @@ pct13_ <- df_km_pcp_annual_mean %>%
   coord_polar(theta = "y") +
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
+            size = 4, color = "white") +
+  scale_fill_manual(values=c("#C77CFF","#Ffa500","#A3A500", 
+                             "#D12405", "#39B600", "#00BFC4",
+                             "#FF62BC", "#000000","#F8766D", 
+                             "#C0C0C0", "#619CFF", "#C2E5EB", "#CD7F32"))+
   labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(
+    legend.text = element_text(size = 24),
+    legend.title = element_text(size = 24))
 
-grid.arrange(pct2_, pct4_, pct13_, ncol = 3)
+grid.arrange(pct2_, pct4_, pct13_, ncol = 3,
+             top = textGrob(
+               "Porcentaje de estaciones metereológicas en cada cluster",
+               gp = gpar(fontsize = 24, fontface = "bold")
+             ))
 
 # 2. Random Forest -----
 
@@ -523,264 +604,365 @@ mtrx = scale(mtrx)
 # RandomForest se puede ahcer son una sola columna? R. No arroja error en  factor(yy) ~ ., data = datRFsyn[, 
 #mtrx_1 <- as.matrix(df_pcp_annual_mean[,5])
 
-nfrs <- 50
-ntrs <- 500 # 1000
+#nfrs <- 50
+#ntrs <- 500 # 1000
+#mtry1 <- 4 
+
+## 2.1 addcl1: re-muestreo de cada variable por permutación — muestreo con reemplazo de las columnas -----
+
+nfrs_ = 100 #c(10, 50, 100)#seq(10, 100, 20)
+ntrs_ = c(100,500,1000,2000) #seq(100, 1000, 200)
+mtry1_ = c(3,4,6,8) #seq(2, 10, 2)
+
 # mtry1: sqrt(p) -> sqrt(12) = 3.4
+out_ = list()
+
+for(i in mtry1_){
+  for(j in ntrs_){
+    for(h in nfrs_){
+      rfds_ <- RFdist(mtrx, 
+                      mtry1 = i, # num de variables en c/división
+                      no.tree = j, # num de árboles
+                      no.rep = h, # num de repeticiones/ num de bosques a promediar
+                      addcl1 = T, 
+                      addcl2 = F, 
+                      imp = T, 
+                      oob.prox1 = T)
+      
+      avg_ = c()
+      for(k in 2:16){
+        lbrf <- pamNew(rfds_$cl1, k)
+        avg_ = c(avg_, lbrf$avg_silhouette_width)
+      }
+      
+      nam_ = paste(i,j,h, sep ='|')  
+      out_[[nam_]] = avg_
+    }
+  }
+}
+
+# el num de repeticiones no afecta la métrica del aveg silhouette
+df_avg_silhouette2 = bind_rows(out_) %>% `colnames<-`(paste0('p_', names(.))) %>%
+  mutate(k = 2:16) %>% 
+  pivot_longer(cols = starts_with('p_'),, names_to = "params", values_to = "avg_")
+
+ggplot(mutate(df_avg_silhouette2, 
+                            params = str_replace(str_replace(params, '\\|100$',''), 'p_', ''),
+                            n_tree = as.numeric(str_replace(params, pattern = "^[^|]*\\|",'')),
+                            mtry1 = paste0('mtry1 = ',str_replace(params, pattern = "\\|.*",''))) %>% 
+                       filter(n_tree>100) %>% 
+                       filter(mtry1 %in% c('mtry1 = 3', 'mtry1 = 4')), 
+                     aes(x = k, y = avg_, color = factor(n_tree))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    x = 'Number of clusters k',
+    y = 'Average Silhouette width',
+    color = "Parámetros \nn.rep=100 \nn.tree:"
+  ) +
+  theme_minimal() +
+  facet_wrap(~ mtry1, scales = "fixed") +
+  my_theme()+ 
+  theme(strip.text = element_text(size = 24, face = "bold"),
+        axis.text.x = element_text(vjust=0, angle =0))
+
 rfds <- RFdist(mtrx, 
                mtry1 = 4, # num de variables en c/división
-               ntrs, # num de árboles
-               nfrs, # num de repeticiones/ num de bosques a promediar
+               1000, # num de árboles
+               100, # num de repeticiones/ num de bosques a promediar
                addcl1 = T, 
                addcl2 = F, 
                imp = T, 
                oob.prox1 = T)
 
-rfds2 <- RFdist(mtrx, 
-                mtry1 = 4, # num de variables en c/división
-                ntrs, # num de árboles
-                nfrs, # num de repeticiones/ num de bosques a promediar
-                addcl1 = F, 
-                addcl2 = T, 
-                imp = T, 
-                oob.prox1 = T)
-
-#lbrf <- pamNew(rfds$cl1, 5)
-
-lbrf = list()
-for(k in 2:16){
-  lbrf[[k]] <- pamNew(rfds$cl1, k)
-}
-
-lbrf2 = list()
-for(k in 2:16){
-  lbrf2[[k]] <- pamNew(rfds2$cl2, k)
-}
-
-avg_silhouette_width = c()
-avg_silhouette_width2 = c()
-
-for(i in 2:length(lbrf)){
-  avg_silhouette_width = c(avg_silhouette_width,
-                           lbrf[[i]]$avg_silhouette_width)
-}
-
-for(i in 2:length(lbrf2)){
-  avg_silhouette_width2 = c(avg_silhouette_width2,
-                           lbrf2[[i]]$avg_silhouette_width)
-}
-
-
-df_RF_ = data.frame(k = 2:16, avg_silhouette_width)
-df_RF_2 = data.frame(k = 2:16, avg_silhouette_width2)
-
-ggplot(df_RF_, aes(x = k, y = avg_silhouette_width))+
-  geom_line() +
-  geom_point()+
-  scale_x_continuous(breaks = seq(1, 16, 1)) +
-  labs(x = 'Number of clusters k',
-       y = 'Average Silhouette width')+
-  theme(axis.text.x = element_text(size = 24),
-        axis.text.y = element_text(size = 24),
-        axis.title=element_text(size=24))
-
-ggplot(df_RF_2, aes(x = k, y = avg_silhouette_width2))+
-  geom_line() +
-  geom_point()+
-  scale_x_continuous(breaks = seq(1, 16, 1)) +
-  labs(x = 'Number of clusters k',
-       y = 'Average Silhouette width')+
-  theme(axis.text.x = element_text(size = 24),
-        axis.text.y = element_text(size = 24),
-        axis.title=element_text(size=24))
-  
-table(lbrf[[2]]$label)
-table(lbrf[[4]]$label)
-
-df_pcp_monthly_normal = df_pcp_monthly_normal %>% ungroup() %>%  
-  mutate(clust2_RF = factor(lbrf[[2]]$label),
-         clust4_RF = factor(lbrf[[4]]$label))
+lbrf_2 <- pamNew(rfds$cl1, 2)
+lbrf_4 <- pamNew(rfds$cl1, 4)
 
 df_pcp_monthly_normal2 = df_pcp_monthly_normal %>% ungroup() %>%  
-  mutate(clust2_RF = factor(lbrf2[[2]]$label),
-         clust3_RF = factor(lbrf2[[3]]$label))
+  mutate(clust2_RF = factor(lbrf_2$label),
+         clust4_RF = factor(lbrf_4$label))
 
-join_cluster = left_join(df_pcp_annual_mean,
-                         dplyr::select(df_pcp_monthly_normal,ID, clust4_RF, clust2_RF),
-                         by = c('ID'))
-
-join_cluster2 = left_join(df_pcp_annual_mean,
-                         dplyr::select(df_pcp_monthly_normal2,ID, clust3_RF, clust2_RF),
-                         by = c('ID'))
-
-table(join_cluster$clust2, join_cluster$clust2_RF)
-table(join_cluster$clust4, join_cluster$clust4_RF)
-
-df_RF_pivot_longer = df_pcp_monthly_normal %>% 
+df_RF_pivot_longer = df_pcp_monthly_normal2 %>% 
   pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
   mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
 
-df_RF_pivot_longer2 = df_pcp_monthly_normal2 %>% 
-  pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
-  mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
-
-df_RF_pcp_monthly_normal = st_as_sf(df_pcp_monthly_normal, 
+df_RF_pcp_monthly_normal = st_as_sf(df_pcp_monthly_normal2, 
                                     coords=c('X', 'Y'), 
                                     crs= "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
-
-df_RF_pcp_monthly_normal2 = st_as_sf(df_pcp_monthly_normal2, 
-                                    coords=c('X', 'Y'), 
-                                    crs= "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
-
 
 map2_RF <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
   geom_sf(data = rename(df_RF_pcp_monthly_normal, 'Cluster'=clust2_RF), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(17, 16))+
+  scale_color_manual(values=c("#F8766D","#00BFC4"))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
-
-map2_RF2 <- ggplot() + 
-  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = rename(df_RF_pcp_monthly_normal2, 'Cluster'=clust2_RF), 
-          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
-  theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
-
-map3_RF2 <- ggplot() + 
-  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = rename(df_RF_pcp_monthly_normal2, 'Cluster'=clust3_RF), 
-          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
-  theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
+  theme(legend.position = c(0.9, 0.9)) + 
+  my_theme()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
 
 map4_RF <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
   geom_sf(data = rename(df_RF_pcp_monthly_normal, 'Cluster'=clust4_RF), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(17, 18, 16, 4))+
+  scale_color_manual(values=c("#F8766D", "#A3A500","#00BFC4", "#C77CFF" ))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
+  theme(legend.position = c(0.9, 0.9))+ 
+  my_theme()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
 
 bx2_RF <- ggplot(rename(df_RF_pivot_longer, 'Cluster'=clust2_RF), 
-              aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
-  geom_boxplot() + 
-  scale_y_continuous(breaks = seq(0, 1200, 400)) +
-  theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Normal precipitación mensual")
-
-bx2_RF2 <- ggplot(rename(df_RF_pivot_longer2, 'Cluster'=clust2_RF), 
                  aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
   geom_boxplot() + 
+  scale_fill_manual(values=c("#F8766D","#00BFC4"))+
   scale_y_continuous(breaks = seq(0, 1200, 400)) +
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Normal precipitación mensual")
-
-bx3_RF2 <- ggplot(rename(df_RF_pivot_longer2, 'Cluster'=clust3_RF), 
-                 aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
-  geom_boxplot() + 
-  scale_y_continuous(breaks = seq(0, 1200, 400)) +
-  theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Normal precipitación mensual")
-
+  labs(y = "Normal precipitación mensual") +
+  my_theme_bx()
 
 bx4_RF <- ggplot(rename(df_RF_pivot_longer, 'Cluster'=clust4_RF), 
-              aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
-  geom_boxplot() + 
+                 aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#F8766D", "#A3A500","#00BFC4", "#C77CFF" ))+
   scale_y_continuous(breaks = seq(0, 1200, 400)) +
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Normal precipitación mensual")
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()
 
 grid.arrange(map2_RF, bx2_RF, ncol = 2)
 grid.arrange(map4_RF, bx4_RF, ncol = 2)
 
-grid.arrange(map2_RF2, bx2_RF2, ncol = 2)
-grid.arrange(map3_RF2, bx3_RF2, ncol = 2)
+join_cluster = left_join(df_pcp_annual_mean,
+                         dplyr::select(df_pcp_monthly_normal2, ID, clust4_RF, clust2_RF),
+                         by = c('ID'))
 
-pct2_RF <- df_pcp_monthly_normal %>% 
+table(join_cluster$clust2, join_cluster$clust2_RF)
+table(join_cluster$clust4, join_cluster$clust4_RF)
+
+pct2_RF <- df_pcp_monthly_normal2 %>% 
   count(clust2_RF) %>%
   mutate(pct = n / sum(n) * 100,
          label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
   ggplot(aes(x = "", y = n, fill = clust2_RF)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#F8766D","#00BFC4"))+
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
+            fontface = "bold", size = 5, color = "white") +
   labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
 
-pct2_RF2 <- df_pcp_monthly_normal2 %>% 
-  count(clust2_RF) %>%
-  mutate(pct = n / sum(n) * 100,
-         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
-  ggplot(aes(x = "", y = n, fill = clust2_RF)) +
-  geom_col(width = 1, color = "white") +
-  coord_polar(theta = "y") +
-  geom_text(aes(label = label),
-            position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
-  labs(fill = "Cluster") +
-  #scale_fill_viridis_d(option = "turbo") + 
-  theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
-
-pct3_RF2 <- df_pcp_monthly_normal2 %>% 
-  count(clust3_RF) %>%
-  mutate(pct = n / sum(n) * 100,
-         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
-  ggplot(aes(x = "", y = n, fill = clust3_RF)) +
-  geom_col(width = 1, color = "white") +
-  coord_polar(theta = "y") +
-  geom_text(aes(label = label),
-            position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
-  labs(fill = "Cluster") +
-  #scale_fill_viridis_d(option = "turbo") + 
-  theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
-
-pct4_RF <- df_pcp_monthly_normal %>% 
+pct4_RF <- df_pcp_monthly_normal2 %>% 
   count(clust4_RF) %>%
   mutate(pct = n / sum(n) * 100,
          label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
   ggplot(aes(x = "", y = n, fill = clust4_RF)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#F8766D", "#A3A500","#00BFC4", "#C77CFF" ))+
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
+            fontface = "bold", size = 5, color = "white") +
   labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
 
 grid.arrange(pct2_RF, pct4_RF, ncol = 2,
              top = textGrob(
                "Porcentaje de estaciones metereológicas en cada cluster",
-               gp = gpar(fontsize = 16, fontface = "bold")
+               gp = gpar(fontsize = 24, fontface = "bold")
              ))
+
+## 2.2 addcl2: generación de v.a. uniformes en el rango observado por columna ----
+
+nfrs_ = 100 #c(10, 50, 100)#seq(10, 100, 20)
+ntrs_ = c(500,1000,2000) #seq(100, 1000, 200)
+mtry1_ = c(3,4) #seq(2, 10, 2)
+
+# mtry1: sqrt(p) -> sqrt(12) = 3.4
+out_2 = list()
+
+for(i in mtry1_){
+  for(j in ntrs_){
+    for(h in nfrs_){
+      rfds_2 <- RFdist(mtrx, 
+                       mtry1 = i, # num de variables en c/división
+                       no.tree = j, # num de árboles
+                       no.rep = h, # num de repeticiones/ num de bosques a promediar
+                       addcl1 = F, 
+                       addcl2 = T, 
+                       imp = T, 
+                       oob.prox1 = T)
+      
+      avg_ = c()
+      for(k in 2:16){
+        lbrf <- pamNew(rfds_2$cl2, k)
+        avg_ = c(avg_, lbrf$avg_silhouette_width)
+      }
+      
+      nam_ = paste(i,j,h, sep ='|')  
+      out_2[[nam_]] = avg_
+    }
+  }
+}
+
+# el num de repeticiones no afecta la métrica del aveg silhouette
+df_avg_silhouette3 = bind_rows(out_2) %>% `colnames<-`(paste0('p_', names(.))) %>%
+  mutate(k = 2:16) %>% 
+  pivot_longer(cols = starts_with('p_'),, names_to = "params", values_to = "avg_")
+
+ggplot(mutate(df_avg_silhouette3, 
+              params = str_replace(str_replace(params, '\\|100$',''), 'p_', ''),
+              n_tree = as.numeric(str_replace(params, pattern = "^[^|]*\\|",'')),
+              mtry1 = paste0('mtry1 = ',str_replace(params, pattern = "\\|.*",''))) %>% 
+         filter(n_tree>100) %>% 
+         filter(mtry1 %in% c('mtry1 = 3', 'mtry1 = 4')), 
+       aes(x = k, y = avg_, color = factor(n_tree))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    x = 'Number of clusters k',
+    y = 'Average Silhouette width',
+    color = "Parámetros \nn.rep=100 \nn.tree:"
+  ) +
+  theme_minimal() +
+  facet_wrap(~ mtry1, scales = "fixed") +
+  my_theme()+ 
+  theme(strip.text = element_text(size = 24, face = "bold"),
+        axis.text.x = element_text(vjust=0, angle =0))
+
+rfds2 <- RFdist(mtrx, 
+                mtry1 = 4, # num de variables en c/división
+                2000, # num de árboles
+                100, # num de repeticiones/ num de bosques a promediar
+                addcl1 = F, 
+                addcl2 = T, 
+                imp = T, 
+                oob.prox1 = T)
+
+lbrf_2 <- pamNew(rfds2$cl2, 2)
+lbrf_3 <- pamNew(rfds2$cl2, 3)
+
+df_pcp_monthly_normal3 = df_pcp_monthly_normal %>% ungroup() %>%  
+  mutate(clust2_RF = factor(lbrf_2$label),
+         clust3_RF = factor(lbrf_3$label))
+
+join_cluster2 = left_join(df_pcp_annual_mean,
+                         dplyr::select(df_pcp_monthly_normal3, ID, clust3_RF, clust2_RF),
+                         by = c('ID'))
+
+df_RF_pivot_longer2 = df_pcp_monthly_normal3 %>% 
+  pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
+  mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
+
+df_RF_pcp_monthly_normal3 = st_as_sf(df_pcp_monthly_normal3, 
+                                    coords=c('X', 'Y'), 
+                                    crs= "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+
+map2_RF2 <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_RF_pcp_monthly_normal3, 'Cluster'=clust2_RF), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(17, 16))+
+  scale_color_manual(values=c("#F8766D","#00BFC4"))+
+  theme_minimal()+
+  my_theme()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
+
+map3_RF2 <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_RF_pcp_monthly_normal3, 'Cluster'=clust3_RF), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(17, 16, 4))+
+  scale_color_manual(values=c("#F8766D", "#00BFC4", "#C77CFF"))+
+  theme_minimal()+
+  my_theme()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
+
+
+bx2_RF2 <- ggplot(rename(df_RF_pivot_longer2, 'Cluster'=clust2_RF), 
+                 aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_fill_manual(values=c("#F8766D","#00BFC4"))+
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal()+
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()
+
+bx3_RF2 <- ggplot(rename(df_RF_pivot_longer2, 'Cluster'=clust3_RF), 
+                 aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_fill_manual(values=c("#F8766D", "#00BFC4", "#C77CFF"))+
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal()+
+  theme(legend.position = c(0.9, 0.9))+
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()
+
+grid.arrange(map2_RF2, bx2_RF2, ncol = 2)
+grid.arrange(map3_RF2, bx3_RF2, ncol = 2)
+
+pct2_RF2 <- df_pcp_monthly_normal3 %>% 
+  count(clust2_RF) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust2_RF)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#F8766D","#00BFC4"))+
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            fontface = 'bold', size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
+
+pct3_RF2 <- df_pcp_monthly_normal3 %>% 
+  count(clust3_RF) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust3_RF)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#F8766D", "#00BFC4", "#C77CFF"))+
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            fontface = 'bold', size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
 
 grid.arrange(pct2_RF2, pct3_RF2, ncol = 2,
              top = textGrob(
                "Porcentaje de estaciones metereológicas en cada cluster",
-               gp = gpar(fontsize = 16, fontface = "bold")
+               gp = gpar(fontsize = 24, fontface = "bold")
              ))
 
 # 3. K-means normales mensuales -----------------------------------------------
 
 # Wss
 fnb1 <- fviz_nbclust(mtrx, FUN = kmeans, method = "wss") +
-  geom_hline(yintercept = km_list[[5]]$tot.withinss, linetype = 2) 
+  geom_hline(yintercept = km_list[[5]]$tot.withinss, linetype = 2) +
+  my_theme_bx()
 
 # de 3  a 4 grupos
 # Silhouette
 fnb2 <- fviz_nbclust(mtrx, FUN = kmeans, 
-                     method = "silhouette", k.max = 20) # 2 o 3 grupos
+                     method = "silhouette", k.max = 20)+
+  my_theme() # 2 o 3 grupos
+
 # gap_stat
 # compute gap statistic
 set.seed(12)
@@ -789,7 +971,7 @@ gap_stat <- clusGap(mtrx, FUN = kmeans, nstart = 25,
 print(gap_stat, method = "firstmax")
 
 set.seed(12)
-fnb3 <- fviz_nbclust(mtrx, FUN = kmeans, method = "gap_stat", k.max = 50) #+ 
+fnb3 <- fviz_nbclust(mtrx, FUN = kmeans, method = "gap_stat", k.max = 25) #+ 
   #geom_hline(yintercept = 0.81, linetype = 2) +
   #coord_cartesian(xlim = c(1.75,20)) # 2, 13 o 16 grupos
 
@@ -802,13 +984,13 @@ for(k in n_optim){
   km_list[[k]] = kmeans(mtrx, k, nstart = 25)
 }
 
-df_pcp_monthly_normal2 = df_pcp_monthly_normal %>% ungroup() %>% 
+df_pcp_monthly_normal4 = df_pcp_monthly_normal %>% ungroup() %>% 
   mutate(clust2 = factor(km_list[[2]]$cluster),
          clust3 = factor(km_list[[3]]$cluster),
          clust4 = factor(km_list[[4]]$cluster),
          clust5 = factor(km_list[[5]]$cluster))
 
-ggplot(df_pcp_monthly_normal2, aes(X, Y, color = clust2)) +
+ggplot(df_pcp_monthly_normal4, aes(X, Y, color = clust2)) +
   geom_point(alpha = 0.25)
 
 row.names(mtrx) <- df_pcp_monthly_normal$ID
@@ -833,91 +1015,102 @@ ggplot(data.frame(plot_data), aes(PC1, PC2, color = factor(km_list[[2]]$cluster)
   geom_point() +
   theme_minimal()
 
-km_list[[2]]
-
-df_km_pivot_longer <- df_pcp_monthly_normal2 %>% 
+df_km_pivot_longer <- df_pcp_monthly_normal4 %>% 
   pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
   mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
 
-df_pcp_monthly_normal2 = st_as_sf(df_pcp_monthly_normal2, 
+df_pcp_monthly_normal4 = st_as_sf(df_pcp_monthly_normal4, 
                                   coords = c('X', 'Y'),
                                   crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
 
 
-map2 <- ggplot() + 
+map2_km <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = rename(df_pcp_monthly_normal2, 'Cluster'=clust2), 
+  geom_sf(data = rename(df_pcp_monthly_normal4, 'Cluster'=clust2), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(16, 17))+
+  scale_color_manual(values=c("#00BFC4", "#F8766D"))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
+  my_theme()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
 
-map5 <- ggplot() + 
+map5_km <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = rename(df_pcp_monthly_normal2, 'Cluster'=clust5), 
+  geom_sf(data = rename(df_pcp_monthly_normal4, 'Cluster'=clust5), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(4,17,15, 18, 16))+
+  scale_color_manual(values=c("#C77CFF","#F8766D", "#FB61D7", "#A3A500","#00BFC4"))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
+  my_theme()+
+  theme(legend.position = c(0.9, 0.85))+
+  guides(color = guide_legend(override.aes = list(size = 4)))
 
 bx2_km <- ggplot(rename(df_km_pivot_longer, 'Cluster'=clust2), 
                  aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
   geom_boxplot() + 
+  scale_fill_manual(values=c("#00BFC4", "#F8766D"))+
   scale_y_continuous(breaks = seq(0, 1200, 400)) +
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Normal precipitación mensual")
-
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()
+  
 bx5_km <- ggplot(rename(df_km_pivot_longer, 'Cluster'=clust5), 
                  aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
   geom_boxplot() + 
+  scale_fill_manual(values=c("#C77CFF","#F8766D", "#FB61D7", "#A3A500","#00BFC4"))+
   scale_y_continuous(breaks = seq(0, 1200, 400)) +
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Normal precipitación mensual")
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()+
+  theme(legend.position = c(0.9, 0.85))
 
+grid.arrange(map2_km, bx2_km, ncol = 2)
+grid.arrange(map5_km, bx5_km, ncol = 2)
 
-grid.arrange(map2, bx2_km, ncol = 2)
-grid.arrange(map5, bx5_km, ncol = 2)
-
-pct2_km2 <- df_pcp_monthly_normal2 %>% 
+pct2_km2 <- df_pcp_monthly_normal4 %>% 
   count(clust2) %>%
   mutate(pct = n / sum(n) * 100,
          label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
   ggplot(aes(x = "", y = n, fill = clust2)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#00BFC4", "#F8766D"))+
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
+            fontface ="bold", size = 5, color = "white") +
   labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
 
-pct5_km2 <- df_pcp_monthly_normal2 %>% 
+pct5_km2 <- df_pcp_monthly_normal4 %>% 
   count(clust5) %>%
   mutate(pct = n / sum(n) * 100,
          label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
   ggplot(aes(x = "", y = n, fill = clust5)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#C77CFF","#F8766D", "#FB61D7", "#A3A500","#00BFC4"))+
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
+            fontface ="bold", size = 5, color = "white") +
   labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
 
 grid.arrange(pct2_RF, pct4_RF, ncol = 2,
              top = textGrob(
                "Porcentaje de estaciones metereológicas en cada cluster",
-               gp = gpar(fontsize = 16, fontface = "bold")
+               gp = gpar(fontsize = 24, fontface = "bold")
              ))
 
 grid.arrange(pct2_km2, pct5_km2, ncol = 2,
              top = textGrob(
                "Porcentaje de estaciones metereológicas en cada cluster",
-               gp = gpar(fontsize = 16, fontface = "bold")
+               gp = gpar(fontsize = 24, fontface = "bold")
              ))
 
 names(df_pcp_monthly_normal2) # 2 o 5 grupos
@@ -974,29 +1167,72 @@ names(clust.p_L2_pam) <-paste0("k_", rep(2:13, each = 1))
 cvi_p_L2_pam = sapply(clust.p_L2_pam, cvi, type ="internal")
 
 options(scipen = 999)
-cvi_min = cvi_p_L2_pam[row.names(cvi_p_L2_pam) %in% c('DB', 'DBstar', 'COP'),] %>% 
-  as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
-  pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
-  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', ''))) #%>% 
-  #pivot_wider(names_from = cvi, values_from = index)
+cvi_min = function(M){
+  ####################################################################
+  # M: matrix
+  ####################################################################
+  df <- M[row.names(M) %in% c('DB', 'DBstar', 'COP'),] %>% 
+    as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
+    pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
+    mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', '')))
+  return(df)
+}
 
-ggplot(cvi_min, aes(x = n_clust, y = index)) + 
+cvi_max = function(M){
+  ####################################################################
+  # M: matrix
+  ####################################################################
+  df <- M[row.names(M) %in% c('Sil', 'SF', 'CH', 'D'),] %>% 
+    as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
+    pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
+    mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', '')))
+  return(df)
+}
+
+cvi_min_ = cvi_min(cvi_p_L2_pam)
+
+min_cvi_ = ggplot(cvi_min_, aes(x = n_clust, y = index)) + 
   geom_line() + 
-  facet_wrap(~ cvi, scales = "free") +
+  facet_wrap(~ cvi, scales = "free", ncol = 2) +
   scale_x_continuous(breaks = seq(2, 13, 1)) +
-  theme_minimal()
+  theme_minimal() + 
+  labs(y = '', x = 'Number of clusters k ')+ 
+  theme(strip.text = element_text(size = 24, face = "bold"),
+        axis.text = element_text(size = 16),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_line(color = "lightgrey", size = 0.25))
 
-cvi_max = cvi_p_L2_pam[row.names(cvi_p_L2_pam) %in% c('Sil', 'SF', 'CH', 'D'),] %>% 
+cvi_max_ = cvi_max(cvi_p_L2_pam)
+
+View(cvi_max_)
+cvi_max_ = cvi_p_L2_pam[row.names(cvi_p_L2_pam) %in% c('Sil', 'SF', 'CH', 'D'),] %>% 
   as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
   pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
   mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', ''))) #%>% 
   #pivot_wider(names_from = cvi, values_from = index)
 
-ggplot(cvi_max, aes(x = n_clust, y = index)) + 
+max_cvi_ = ggplot(cvi_max_, aes(x = n_clust, y = index)) + 
   geom_line() +
   facet_wrap(~ cvi, scales = "free") +
   scale_x_continuous(breaks = seq(2, 13, 1)) +
-  theme_minimal()
+  theme_minimal() +
+  labs(y = '', x = 'Number of clusters k ')+ 
+  theme(strip.text = element_text(size = 24, face = "bold"),
+        axis.text = element_text(size = 16),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_line(color = "lightgrey", size = 0.25))
+
+grid.arrange(min_cvi_, max_cvi_, ncol = 2,
+             top = textGrob(
+               "Índices de validación de clusters",
+               gp = gpar(fontsize = 24, fontface = "bold")
+             ))
 
 # !!! No compila debido a las repeticiones
 #names(clust.p_L2_pam2) <-paste0("k_", rep(2:5, each = 8))
@@ -1018,7 +1254,6 @@ clust2.p_L2_pam <- tsclust(mtrx.norm,
 stopCluster(workers)
 # Gobacktosequentialcomputation
 registerDoSEQ()
-
 
 names(clust2.p_L2_pam) <-paste0("r_", 1L:4L)
 clust2.p_L2_pam_ <- cl_ensemble(list = clust2.p_L2_pam)
@@ -1046,39 +1281,65 @@ clust.p_dtw_pam <- tsclust(mtrx.norm,
                            type="partitional", 
                            k=2L:13L, 
                            distance="dtw", window.size = 20L,
-                           centroid="pam")#,
-                           #control = partitional_control(nrep = 4L))
+                           centroid="pam",
+                           seed = 42,
+                           control = partitional_control(nrep = 25L))
 
-names(clust.p_dtw_pam) <-paste0("k_", rep(2:13, each = 1))
+names(clust.p_dtw_pam) <-paste0("k_", rep(2:13, each = 25))
+
 cvi_p_dtw_pam = sapply(clust.p_dtw_pam, cvi, type ="internal")
 
 stopCluster(workers)
 # Gobacktosequentialcomputation
 registerDoSEQ()
 
-cvi_min = cvi_p_dtw_pam[row.names(cvi_p_dtw_pam) %in% c('DB', 'DBstar', 'COP'),] %>% 
-  as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
+cvi_min_2 = cvi_p_dtw_pam[row.names(cvi_p_dtw_pam) %in% c('DB', 'DBstar', 'COP'),] %>% 
+  as.data.frame() %>% `colnames<-`(paste0(names(.), '_',1:ncol(.))) %>% 
+  mutate(cvi = row.names(.)) %>%  `colnames<-`(str_replace(names(.), "_[^_]*$",'')) %>% 
   pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
-  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', ''))) #%>% 
-#pivot_wider(names_from = cvi, values_from = index)
+  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', '')))
 
-ggplot(cvi_min, aes(x = n_clust, y = index)) + 
-  geom_line() + 
-  facet_wrap(~ cvi, scales = "free") + 
+min_cvi_2 <- ggplot(cvi_min_2, aes(x = n_clust, y = index, group = n_clust)) + 
+  geom_boxplot() + 
+  facet_wrap(~ cvi, scales = "free", ncol = 2) + 
   scale_x_continuous(breaks = seq(2, 13, 1)) +
-  theme_minimal()
+  theme_minimal()+ 
+  labs(y = '', x = 'Number of clusters k ')+ 
+  theme(strip.text = element_text(size = 24, face = "bold"),
+        axis.text = element_text(size = 16),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_line(color = "lightgrey", size = 0.25))
 
-cvi_max = cvi_p_dtw_pam[row.names(cvi_p_dtw_pam) %in% c('Sil', 'SF', 'CH', 'D'),] %>% 
-  as.data.frame() %>% mutate(cvi = row.names(.)) %>% 
+cvi_max_2 = cvi_p_dtw_pam[row.names(cvi_p_dtw_pam) %in% c('Sil', 'SF', 'CH', 'D'),] %>% 
+  as.data.frame() %>% `colnames<-`(paste0(names(.), '_',1:ncol(.))) %>% 
+  mutate(cvi = row.names(.)) %>%  `colnames<-`(str_replace(names(.), "_[^_]*$",'')) %>% 
   pivot_longer(cols = starts_with('k_'), names_to = "n_clust", values_to = "index") %>% 
-  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', ''))) #%>% 
-#pivot_wider(names_from = cvi, values_from = index)
+  mutate(n_clust = as.numeric(str_replace(n_clust, 'k_', '')))
 
-ggplot(cvi_max, aes(x = n_clust, y = index)) + 
-  geom_line() + 
+group_by(cvi_max_2, cvi, n_clust) %>% summarise(quantile(index, probs = 0.5)) %>%  View()
+
+max_cvi_2 <- ggplot(cvi_max_2, aes(x = n_clust, y = index, group = n_clust)) + 
+  geom_boxplot() + 
   facet_wrap(~ cvi, scales = "free") +
   scale_x_continuous(breaks = seq(2, 13, 1)) +
-  theme_minimal()
+  theme_minimal() + 
+  labs(y = '', x = 'Number of clusters k ')+ 
+  theme(strip.text = element_text(size = 24, face = "bold"),
+        axis.text = element_text(size = 16),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_line(color = "lightgrey", size = 0.25))
+
+grid.arrange(min_cvi_2, max_cvi_2, ncol = 2,
+             top = textGrob(
+               "Índices de validación de clusters",
+               gp = gpar(fontsize = 24, fontface = "bold")
+             ))
 
 workers<-makeCluster(8L)
 
@@ -1086,24 +1347,29 @@ invisible(clusterEvalQ(workers,library("dtwclust")))
 # Registerthebackend;thisstepMUSTbedone
 registerDoParallel(workers)
 
-clust5.p_dtw_pam <- tsclust(mtrx.norm, 
+clust4.p_dtw_pam <- tsclust(mtrx.norm, 
                             type="partitional", 
-                            k=5L, 
+                            k=4L, 
                             distance="dtw", window.size = 20L,
                             centroid="pam",
                             seed = 42,
-                            control = partitional_control(nrep = 4L))
+                            control = partitional_control(nrep = 25L))
 stopCluster(workers)
 # Gobacktosequentialcomputation
 registerDoSEQ()
 
-names(clust5.p_dtw_pam) <-paste0("r_", 1L:4L)
-clust5.p_dtw_pam_ <- cl_ensemble(list = clust5.p_dtw_pam)
-cl_dissimilarity(clust5.p_dtw_pam_)
+names(clust4.p_dtw_pam) <-paste0("r_", 1L:25L)
+clust4.p_dtw_pam_ <- cl_ensemble(list = clust4.p_dtw_pam)
+cl_dissimilarity(clust4.p_dtw_pam)
+
+g1_p_dtw_pam <- plot(clust4.p_dtw_pam$r_8, type = "sc")
+g2_p_dtw_pam <- plot(clust4.p_dtw_pam$r_8, type = "centroids")
+
+grid.arrange(g1_p_dtw_pam, g2_p_dtw_pam, ncol = 1)
 
 # !!! No funciona
 #table(Medoid = cl_class_ids(cl_medoid(clust5.p_dtw_pam_)),
-#      "True Classes"= rep(c(5L, 4L, 3L, 2L, 1L), each= 4L))
+# "True Classes"= rep(c(5L, 4L, 3L, 2L, 1L), each= 4L))
 
 ## 4.3 Hierarchical clustering with Euclidean distance and PAM centroids -------
 # type = "hierarchical", distance = "L2", centroid = "pam"
@@ -1111,7 +1377,8 @@ cl_dissimilarity(clust5.p_dtw_pam_)
 cvi_p_L2_pam_rep = sapply(clust2.p_L2_pam, cvi, type = 'internal')
 cvi_mean_p_L2_pam = apply(cvi_p_L2_pam_rep, MARGIN = 1, mean) # promedio métricas
 
-# por votación se queda con la réplica 3 de mejor desempeño
+cols_max = c('Sil', 'SF', 'CH', 'D')
+# por votación se queda con la réplica 1 de mejor desempeño
 sapply(row.names(cvi_p_L2_pam_rep), function(x) {
   if(x %in% cols_max){
     which.max(cvi_p_L2_pam_rep[row.names(cvi_p_L2_pam_rep)==x,])
@@ -1129,10 +1396,9 @@ registerDoParallel(workers)
 hclust_methods<-c("single","complete", "average", "mcquitty")
 clust.h_L2_pam <- tsclust(mtrx.norm, 
                           type="hierarchical", 
-                          k=2L, 
+                          k=5L, 
                           #control=hierarchical_control(method = "average"))
-                          control = hierarchical_control(method =  hclust_methods,
-                                                         distmat = clust2.p_L2_pam[[3L]]@distmat))
+                          control = hierarchical_control(method =  hclust_methods))
                           
 stopCluster(workers)
 # Gobacktosequentialcomputation
@@ -1148,11 +1414,12 @@ cvi_min = cvi_h_L2_pam[row.names(cvi_h_L2_pam) %in% col_min,] %>%
   pivot_wider(names_from = cvi, values_from = index)
 
 # average | average | single
+# k = 2 single | single | single
+# k = 5 complete | complete | single
 sapply(col_min, function(x) {
   cvi_min$h_method[cvi_min[,x] == max(cvi_min[,x])]
 })
 
-cols_max = c('Sil', 'SF', 'CH', 'D')
 cvi_max = cvi_h_L2_pam[row.names(cvi_h_L2_pam) %in% cols_max,] %>% 
   as.data.frame() %>% `colnames<-`(paste0('h_', hclust_methods)) %>% 
   mutate(cvi = row.names(.)) %>% 
@@ -1160,21 +1427,22 @@ cvi_max = cvi_h_L2_pam[row.names(cvi_h_L2_pam) %in% cols_max,] %>%
   pivot_wider(names_from = cvi, values_from = index)
 
 # complete | complete | average | single
+# k = 2 average | mcquitty | complete | single
+# k= 5 mcquitty | single | complete | single
 sapply(cols_max, function(x) {
   cvi_max$h_method[cvi_max[,x] == max(cvi_max[,x])]
 })
 
 # fit hierarchical average con misma distancia L2
 # por mayor votación (3) se elige "average"
-clust.h_avg_L2_pam <- tsclust(mtrx.norm, 
-                              type="hierarchical", 
-                              k=2L, 
-                              control = hierarchical_control(method = "average",
-                                                             distmat = clust2.p_L2_pam[[3L]]@distmat))
+clust.h_cmplt_L2_pam <- tsclust(mtrx.norm, 
+                                type="hierarchical", 
+                                k=5L, 
+                                control = hierarchical_control(method = "complete"))
 
 # el método "single" da resultados desproporcionados, casi todos a un cluster
-plot(clust.h_avg_L2_pam) # gráfico dendograma
-table(cutree(clust.h_avg_L2_pam, k =2))
+plot(clust.h_cmplt_L2_pam) # gráfico dendograma
+table(cutree(clust.h_cmplt_L2_pam, k =5))
 
 # Error >> por lo que cvi es de la partición anterior
 #cvi_h_avg_L2_pam = sapply(clust.h_avg_L2_pam, cvi, type = 'internal')
@@ -1182,9 +1450,10 @@ table(cutree(clust.h_avg_L2_pam, k =2))
 # compara con los valores de Simple partitional
 df_L2_pam = cvi_h_L2_pam %>% 
   as.data.frame() %>% `colnames<-`(paste0('h_',hclust_methods)) %>% 
-  dplyr::select('h_average') %>% 
+  dplyr::select('h_complete') %>% 
   bind_cols(as.data.frame(cvi_mean_p_L2_pam))
 
+View(df_L2_pam)
 # por votación se queda con el promedio de las réplicas de partitional - L2 - pam
 sapply(row.names(df_L2_pam), function(x) {
   if(x %in% cols_max){
@@ -1197,64 +1466,121 @@ sapply(row.names(df_L2_pam), function(x) {
 # crea la columna con las etiquetas del clustering
 idx_medoid = cl_class_ids(cl_medoid(clust2.p_L2_pam))
 # se elige la réplica 3 por tener las mejores cvi
-idx_r3 = cl_class_ids(clust2.p_L2_pam$r_3)
+idx_r1 = cl_class_ids(clust2.p_L2_pam$r_1)
 
-plot(clust2.p_L2_pam$r_3, type = "sc")
-plot(clust2.p_L2_pam$r_3, type = "centroids")
+g1_p_l2_pam <- plot(clust2.p_L2_pam$r_1, type = "sc")
+g2_p_l2_pam <- plot(clust2.p_L2_pam$r_1, type = "centroids")
 
-df_pcp_monthly_normal3 = df_pcp_monthly_normal %>% ungroup() %>% 
-  mutate(clust2 = factor(cl_class_ids(clust2.p_L2_pam$r_3)))
+grid.arrange(g1_p_l2_pam, g2_p_l2_pam, ncol = 1)
 
-df_p_l2_pam_pivot_longer <- df_pcp_monthly_normal3 %>% 
+df_pcp_monthly_normal5 = df_pcp_monthly_normal %>% ungroup() %>% 
+  mutate(clust2 = factor(cl_class_ids(clust2.p_L2_pam$r_1)),
+         clust5 = factor(cl_class_ids(clust.h_cmplt_L2_pam)) )
+
+df_p_l2_pam_pivot_longer <- df_pcp_monthly_normal5 %>% 
   pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
   mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
 
-df_pcp_monthly_normal3 = st_as_sf(df_pcp_monthly_normal3, 
+df_pcp_monthly_normal5 = st_as_sf(df_pcp_monthly_normal5, 
                                   coords = c('X', 'Y'),
                                   crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
 
-map2 <- ggplot() + 
+map2_p_l2_pam <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = rename(df_pcp_monthly_normal3, 'Cluster'=clust2), 
+  geom_sf(data = rename(df_pcp_monthly_normal5, 'Cluster'=clust2), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(17, 16))+
+  scale_color_manual(values=c("#F8766D","#00BFC4"))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
+  my_theme()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
 
 bx2_p_l2_pam <- ggplot(rename(df_p_l2_pam_pivot_longer, 'Cluster'=clust2), 
                        aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
   geom_boxplot() + 
+  scale_fill_manual(values=c("#F8766D","#00BFC4"))+
   scale_y_continuous(breaks = seq(0, 1200, 400)) +
   theme_minimal() +
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Normal precipitación mensual")
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()
 
-grid.arrange(map2, bx2_p_l2_pam, ncol = 2)
+grid.arrange(map2_p_l2_pam, bx2_p_l2_pam, ncol = 2)
 
-pct2_p_L2_pam <- df_pcp_monthly_normal3 %>% 
+map5_h_l2_pam <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_pcp_monthly_normal5, 'Cluster'=clust5), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(4,17,18, 15, 16))+
+  scale_color_manual(values=c("#C77CFF","#F8766D", "#A3A500", "#FB61D7", "#00BFC4"))+
+  theme_minimal()+
+  my_theme()+
+  theme(legend.position = c(0.9, 0.85))+
+  guides(color = guide_legend(override.aes = list(size = 4)))
+
+bx5_h_l2_pam <- ggplot(rename(df_p_l2_pam_pivot_longer, 'Cluster'=clust5), 
+                       aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_fill_manual(values=c("#C77CFF","#F8766D", "#A3A500","#FB61D7", "#00BFC4"))+
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal() +
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()+
+  theme(legend.position = c(0.9, 0.85))
+
+grid.arrange(map5_h_l2_pam, bx5_h_l2_pam, ncol = 2)
+
+g1_h_l2_pam <- plot(clust.h_cmplt_L2_pam, type = "sc")
+g2_h_l2_pam <- plot(clust.h_cmplt_L2_pam, type = "centroids")
+
+grid.arrange(g1_h_l2_pam, g2_h_l2_pam, ncol = 1)
+
+pct2_p_L2_pam <- df_pcp_monthly_normal5 %>% 
   count(clust2) %>%
   mutate(pct = n / sum(n) * 100,
          label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
   ggplot(aes(x = "", y = n, fill = clust2)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#F8766D","#00BFC4"))+
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
+            fontface ="bold", size = 5, color = "white") +
   labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
 
-#save.image('clust_sttns_tsclust.RData')
-load('clust_sttns_tsclust.RData')
+pct5_h_L2_pam <- df_pcp_monthly_normal5 %>% 
+  count(clust5) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust5)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#C77CFF","#F8766D", "#A3A500","#FB61D7", "#00BFC4"))+
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            fontface ="bold", size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
+
+grid.arrange(pct2_p_L2_pam, pct5_h_L2_pam, ncol = 2,
+             top = textGrob(
+               "Porcentaje de estaciones metereológicas en cada cluster",
+               gp = gpar(fontsize = 24, fontface = "bold")
+             ))
 
 ## 4.4 Hierarchical clustering with dtw distance -----------------------------
 # type = "h", k = 6L, distance = "dtw"
 
-cvi_p_dtw_pam_rep = sapply(clust5.p_dtw_pam, cvi, type = 'internal')
+cvi_p_dtw_pam_rep = sapply(clust4.p_dtw_pam, cvi, type = 'internal')
 cvi_mean_p_dtw_pam = apply(cvi_p_dtw_pam_rep, MARGIN = 1, mean) # promedio métricas
 
-# por votación se queda con la réplica 4 de mejor desempeño
+# por votación se queda con la réplica 8 de mejor desempeño
 sapply(row.names(cvi_p_dtw_pam_rep), function(x) {
   if(x %in% cols_max){
     which.max(cvi_p_dtw_pam_rep[row.names(cvi_p_dtw_pam_rep)==x,])
@@ -1271,10 +1597,9 @@ registerDoParallel(workers)
 
 clust.h_dtw_pam <- tsclust(mtrx.norm, 
                            type="hierarchical",
-                           k = 5L, 
+                           k = 4L, 
                            distance = "dtw",
-                           control = hierarchical_control(method =  hclust_methods,
-                                                          distmat = clust5.p_dtw_pam[[4L]]@distmat))
+                           control = hierarchical_control(method =  hclust_methods))
 
 stopCluster(workers)
 # Gobacktosequentialcomputation
@@ -1299,22 +1624,22 @@ cvi_max = cvi_h_dtw_pam[row.names(cvi_h_dtw_pam) %in% cols_max,] %>%
   pivot_longer(cols = starts_with('h_'), names_to = "h_method", values_to = "index") %>% 
   pivot_wider(names_from = cvi, values_from = index)
 
-# average | single | complete | single
+# average | single | average | single
 sapply(cols_max, function(x) {
   cvi_max$h_method[cvi_max[,x] == max(cvi_max[,x])]
 })
 
 # fit hierarchical average con misma distancia dtw
 # por mayor votación (3) se elige "complete"
-clust.h_cmplt_L2_pam <- tsclust(mtrx.norm, 
+clust.h_cmplt_dtw_pam <- tsclust(mtrx.norm, 
                                 type="hierarchical", 
-                                k=5L, 
-                                control = hierarchical_control(method = "complete",
-                                                               distmat = clust5.p_dtw_pam[[4L]]@distmat))
+                                k=4L, 
+                                distance = 'dtw',
+                                control = hierarchical_control(method = "complete"))
 
 # el método "single" da resultados desproporcionados, casi todos a un cluster
-plot(clust.h_cmplt_L2_pam) # gráfico dendograma
-table(cutree(clust.h_cmplt_L2_pam, k =5))
+plot(clust.h_cmplt_dtw_pam) # gráfico dendograma
+table(cutree(clust.h_cmplt_dtw_pam, k =4))
 
 # Error >> por lo que cvi es de la partición anterior
 #cvi_h_cmplt_L2_pam = sapply(clust.h_cmplt_L2_pam, cvi, type = 'internal')
@@ -1335,68 +1660,130 @@ sapply(row.names(df_dtw_pam), function(x) {
 })
 
 # crea la columna con las etiquetas del clustering
-idx_medoid = cl_class_ids(cl_medoid(clust5.p_dtw_pam))
+idx_medoid = cl_class_ids(cl_medoid(clust4.p_dtw_pam))
 # se elige la réplica 3 por tener las mejores cvi
-idx_r4 = cl_class_ids(clust5.p_dtw_pam$r_4)
+idx_r8 = cl_class_ids(clust4.p_dtw_pam$r_8)
 
-plot(clust5.p_dtw_pam$r_4, type = "sc")
-plot(clust5.p_dtw_pam$r_4, type = "centroids")
 
-df_pcp_monthly_normal4 = df_pcp_monthly_normal %>% ungroup() %>% 
-  mutate(clust5 = factor(cl_class_ids(clust5.p_dtw_pam$r_4)))
+plot(clust4.p_dtw_pam$r_8, type = "sc")
+plot(clust4.p_dtw_pam$r_8, type = "centroids")
 
-df_p_dtw_pam_pivot_longer <- df_pcp_monthly_normal4 %>% 
+df_pcp_monthly_normal6 = df_pcp_monthly_normal %>% ungroup() %>% 
+  mutate(clust4 = factor(cl_class_ids(clust4.p_dtw_pam$r_8)),
+         clust4_h = factor(cl_class_ids(clust.h_cmplt_dtw_pam)))
+
+df_p_dtw_pam_pivot_longer <- df_pcp_monthly_normal6 %>% 
   pivot_longer(cols = 2:13, names_to = 'mes', values_to = 'pcp_monthly_mean') %>% 
   mutate(mes = factor(mes, levels = c(1,2,3,4,5,6,7,8,9,10,11,12)))
 
-df_pcp_monthly_normal4 = st_as_sf(df_pcp_monthly_normal4, 
+df_pcp_monthly_normal6 = st_as_sf(df_pcp_monthly_normal6, 
                                   coords = c('X', 'Y'),
                                   crs = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
 
-map5 <- ggplot() + 
+map4_p_dtw <- ggplot() + 
   geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = rename(df_pcp_monthly_normal4, 'Cluster'=clust5), 
+  geom_sf(data = rename(df_pcp_monthly_normal6, 'Cluster'=clust4), 
           aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(4,17,16, 18))+
+  scale_color_manual(values=c("#C77CFF","#F8766D",  "#00BFC4","#A3A500"))+
   theme_minimal()+
-  theme(legend.position = c(0.9, 0.9))
+  my_theme()+
+  theme(legend.position = c(0.9, 0.85))+
+  guides(color = guide_legend(override.aes = list(size = 4)))
 
-bx5_p_dtw_pam <- ggplot(rename(df_p_dtw_pam_pivot_longer, 'Cluster'=clust5), 
-                        aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+map4_h_dtw <- ggplot() + 
+  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = rename(df_pcp_monthly_normal6, 'Cluster'=clust4_h), 
+          aes(fill = Cluster, pch = Cluster, color = Cluster), size = 1) +
+  scale_shape_manual(values=c(16,17,4, 18))+
+  scale_color_manual(values=c("#00BFC4","#F8766D", "#C77CFF","#A3A500"))+
+  theme_minimal()+
+  my_theme()+
+  theme(legend.position = c(0.9, 0.85))+
+  guides(color = guide_legend(override.aes = list(size = 4)))
+
+
+bx4_p_dtw <- ggplot(rename(df_p_dtw_pam_pivot_longer, 'Cluster'=clust4), 
+                    aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
   geom_boxplot() + 
+  scale_fill_manual(values=c("#C77CFF","#F8766D", "#00BFC4", "#A3A500"))+
   scale_y_continuous(breaks = seq(0, 1200, 400)) +
   theme_minimal() +
-  theme(legend.position = c(0.9, 0.9))+
-  labs(y = "Normal precipitación mensual")
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()+
+  theme(legend.position = c(0.9, 0.85))
 
-grid.arrange(map5, bx5_p_dtw_pam, ncol = 2)
+bx4_h_dtw <- ggplot(rename(df_p_dtw_pam_pivot_longer, 'Cluster'=clust4_h), 
+                    aes(x = mes, y = pcp_monthly_mean, fill = Cluster)) +
+  geom_boxplot() + 
+  scale_fill_manual(values=c("#00BFC4","#F8766D","#C77CFF" , "#A3A500"))+
+  scale_y_continuous(breaks = seq(0, 1200, 400)) +
+  theme_minimal() +
+  labs(y = "Normal precipitación mensual")+
+  my_theme_bx()+
+  theme(legend.position = c(0.9, 0.85))
 
-pct5_p_dtw_pam <- df_pcp_monthly_normal4 %>% 
-  count(clust5) %>%
+
+grid.arrange(map4_p_dtw, bx4_p_dtw, ncol = 2)
+grid.arrange(map4_h_dtw, bx4_h_dtw, ncol = 2)
+
+g1_h_dtw_pam <- plot(clust.h_cmplt_dtw_pam, type = "sc")
+g2_h_dtw_pam <- plot(clust.h_cmplt_dtw_pam, type = "centroids")
+
+grid.arrange(g1_h_dtw_pam, g2_h_dtw_pam, ncol = 1)
+
+pct4_p_dtw_pam <- df_pcp_monthly_normal6 %>% 
+  count(clust4) %>%
   mutate(pct = n / sum(n) * 100,
          label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
-  ggplot(aes(x = "", y = n, fill = clust5)) +
+  ggplot(aes(x = "", y = n, fill = clust4)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#C77CFF","#F8766D", "#00BFC4", "#A3A500"))+
   geom_text(aes(label = label),
             position = position_stack(vjust =0.5),
-            size = 5, color = "white") +
+            fontface ="bold", size = 5, color = "white") +
   labs(fill = "Cluster") +
   #scale_fill_viridis_d(option = "turbo") + 
   theme_void() +
-  theme(plot.title = element_text(hjust = 0.5))  
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
 
-grid.arrange(pct2_p_L2_pam, pct5_p_dtw_pam, ncol = 2,
+pct4_h_dtw_pam <- df_pcp_monthly_normal6 %>% 
+  count(clust4_h) %>%
+  mutate(pct = n / sum(n) * 100,
+         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
+  ggplot(aes(x = "", y = n, fill = clust4_h)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values=c("#00BFC4","#F8766D","#C77CFF" , "#A3A500"))+
+  geom_text(aes(label = label),
+            position = position_stack(vjust =0.5),
+            fontface ="bold", size = 5, color = "white") +
+  labs(fill = "Cluster") +
+  #scale_fill_viridis_d(option = "turbo") + 
+  theme_void() +
+  theme(legend.text = element_text(size = 24),
+        legend.title = element_text(size = 24))
+
+
+grid.arrange(pct4_p_dtw_pam, pct4_h_dtw_pam, ncol = 2,
              top = textGrob(
                "Porcentaje de estaciones metereológicas en cada cluster",
-               gp = gpar(fontsize = 16, fontface = "bold")
+               gp = gpar(fontsize = 24, fontface = "bold")
              ))
 
-# 5. Hierachical clustering of spatially correlated fd -------------------------
+save.image('clust_sttns_dtwclust.RData')
+#load('clust_sttns_dtwclust.RData')
+
+# 5. librería HiClimR ----
+
+# 6. Hierachical clustering of spatially correlated fd -------------------------
 
 data(CanadianWeather, package="fda")
 str(CanadianWeather, max.level = 1)
 
-## 4.1 Coordenadas -----------------------------------------------------------
+## 6.1 Coordenadas -----------------------------------------------------------
 
 #coords <- spTransform(coords,canada.CRS)
 coords_df <- data.frame(lon = -CanadianWeather$coordinates[, "W.longitude"], 
@@ -1482,7 +1869,7 @@ plot(Temp.fd)
 #fRegress(CanadianWeather$coordinates)
 #coords = as.data.frame(coords)
 
-## 4.2 Remover la tendencia espacial con el modelo de regresión funcional ------
+## 6.2 Remover la tendencia espacial con el modelo de regresión funcional ------
 ## X_i(t) = \alpha(t) + \beta_1(t) Longitude_i + \beta_2(t) Latitude_i + e_i (t)
 
 #TempRgn.f <- fRegress(Temp.fd ~ N.latitude + W.longitude , coord)
@@ -1500,7 +1887,7 @@ TempRgn.fkm3 <- fRegress(Temp.fd ~ X_km3 + X_km3)
 #TempRgn.f <- fRegress(Temp.fd ~ coords.x1 + coords.x2 , coords)
 #TempRgn.f2 <- fRegress(Temp.fd ~ N.latitude + W.longitude , CanadianWeather_planar)
 
-## 4.3 Obtiene los residuales del modelo funcional -----------------------------
+## 6.3 Obtiene los residuales del modelo funcional -----------------------------
 
 #fdobj.res = TempRgn.f$yfdobj-TempRgn.f$yhatfdobj
 #fdobj.res = Temp.fd-TempRgn.f$yhatfdobj
@@ -1533,7 +1920,7 @@ res_km2 <- eval.fd(day_grid, fdobj.res_km2)
 res_m3 <- eval.fd(day_grid, fdobj.res_m3)
 res_km3 <- eval.fd(day_grid, fdobj.res_km3)
 
-## 4.4 Ajusta la función okfd -------------------------------------------------
+## 6.4 Ajusta la función okfd -------------------------------------------------
 # Fit a spherical model to the estimated trace-variogram by using the OLS technique
 coords.cero <- data.frame(Lon = -64.06, Lat = 44.79)
 
@@ -1599,7 +1986,7 @@ okfd.res$trace.vari.array[[4]] # 8034.03 y 22.08
 
 plot(okfd.res)
 
-## 4.5 Ajusta la función fit.tracevariog --------------------------------------
+## 6.5 Ajusta la función fit.tracevariog --------------------------------------
 M0 <- fourierpen(fdobj.res_m0$basis,  Lfdobj=0)
 res.fd_m0 <- smooth.basis(argvals = 1:365, y = res_m0, fdParobj = Temp.basis)$fd
 L2norm = l2.norm(ncol(fdobj.res_m0$coefs), res.fd_m0, M0)
