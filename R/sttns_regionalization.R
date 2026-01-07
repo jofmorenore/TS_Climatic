@@ -28,9 +28,18 @@ library(fda)
 library(maps)
 library(dplyr)
 library(ggplot2)
+library(units) # convertir a km
+library(maps) # mapa de Canada
+library(ggrepel) # avoid overlap labels in map
+library(clusterSim) # clusted quality measures
+library(factoextra)
+library(cluster)
+library(clusterCrit) # clusted quality index
+library(ggdendro)
 
 setwd('~/TS_climatic/')
 pol2_list <- readRDS('sttns_validation_chirps.RDS')
+chirps_df = arrow::read_parquet("chirps_colombia_df.parquet")
 
 # obtiene media multi-anual
 list_pcp_annual_mean = list()
@@ -1766,394 +1775,459 @@ pct4_h_dtw_pam <- df_pcp_monthly_normal6 %>%
   theme(legend.text = element_text(size = 24),
         legend.title = element_text(size = 24))
 
-
 grid.arrange(pct4_p_dtw_pam, pct4_h_dtw_pam, ncol = 2,
              top = textGrob(
                "Porcentaje de estaciones metereológicas en cada cluster",
                gp = gpar(fontsize = 24, fontface = "bold")
              ))
 
-save.image('clust_sttns_dtwclust.RData')
-#load('clust_sttns_dtwclust.RData')
+#save.image('clust_sttns_dtwclust.RData')
+load('clust_sttns_dtwclust.RData')
 
-# 5. librería HiClimR ----
-
-# 6. Hierachical clustering of spatially correlated fd -------------------------
+# 5. Hierachical clustering of spatially correlated fd -------------------------
 
 data(CanadianWeather, package="fda")
 str(CanadianWeather, max.level = 1)
 
-## 6.1 Coordenadas -----------------------------------------------------------
+coords_ <- data.frame(W.longitude = -CanadianWeather$coordinates[, "W.longitude"], 
+                      N.latitude = CanadianWeather$coordinates[, "N.latitude"])
 
-#coords <- spTransform(coords,canada.CRS)
-coords_df <- data.frame(lon = -CanadianWeather$coordinates[, "W.longitude"], 
-                        lat = CanadianWeather$coordinates[, "N.latitude"])
+#CanadianWeather$coordinates[,2] = -CanadianWeather$coordinates[,2]
 
-convertlatlong2UTM <- function(area, units = 'm') {
-  # temporary sf conversion
-  area <- sf::st_as_sf(area)
-  bounds <- sf::st_bbox(area)
-  lat = mean(bounds[c(2, 4)]) # latitude
-  long = mean(bounds[c(1, 3)]) # longitude
-  # find UTM hemisphere (latitude)
-  hemisphere <- ifelse(lat > 0, "north", "south")
-  # find UTM zone
-  zone <- (floor((long + 180) / 6) %% 60) + 1
-  crs <- paste0("+proj=utm +zone=", zone, " +datum=WGS84 +ellps=WGS84 +", hemisphere,
-                " +units=", units, " +no_defs")
-  return(crs)
+Canada_weather = data.frame(place = CanadianWeather$place,
+                            lat = CanadianWeather$coordinates[,1],
+                            lon = -CanadianWeather$coordinates[,2]) %>% 
+  st_as_sf(coords=c("lon", "lat"), crs =4326)
+
+# EPSG:3347 — NAD83 / Statistics Canada Lambert https://spatialreference.org/ref/epsg/3347/
+#Tipo: proyección cartográfica (plana)
+#Proyección: Lambert Conformal Conic
+#Unidades: metros
+#Extensión: todo Canadá
+#Propósito: análisis estadístico, cartografía nacional
+
+canada.CRS <- CRS("+init=epsg:3347") #
+#canada.CRS <- CRS("+init=epsg:4269") # 
+CanadianWeather_planar = coords_
+
+for(i in 1:nrow(coords_)){
+  CanadianWeather_planar[i,] = coords_[i,] %>%
+    #SpatialPoints(proj4string = CRS("+init=epsg:4326")) %>% 
+    #spTransform(canada.CRS) %>% st_as_sf() %>% 
+    st_as_sf(.,coords=c("W.longitude", "N.latitude"), crs = 4326) %>%
+    #st_transform(crs = convertlatlong2UTM(.)) #%>%
+    st_transform(crs = canada.CRS) %>%
+    st_coordinates()
 }
 
-# 0. fda coordinates
-coords0 <- st_as_sf(coords_df, coords = c("lon", "lat"), crs = 4326)  
-XY_m0 <- st_coordinates(coords0)   
-X_m0 <- XY_m0[,1]; Y_m0 <- XY_m0[,2]
-X_km0 <- X_m0/1000; Y_km0 <- Y_m0/1000
-XY_km0 <- matrix(c(X_km0, Y_km0), nc = 2)
+canada <- map("world", "Canada", fill = TRUE, plot = FALSE)
+# Graficar los bordes de Canadá
+ggplot() +
+  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
+               color = "lightgray", fill = NA) +
+  geom_sf(data = Canada_weather, col = 'black') +
+  geom_label_repel(data = Canada_weather, 
+                   aes(label = place, geometry = geometry),
+                   stat = "sf_coordinates",  # Extract coordinates from sf geometry
+                   size = 3)+
+  theme_bw()
 
-# 1. github.com/mpbohorquezc/SpatFD-Functional-Geostatistics/man/sim_functional_process.Rd
-# NO convierte a negativo la longitud
-canada.CRS <- CRS("+init=epsg:4608")
-coords1 <- SpatialPoints(CanadianWeather$coordinates,
-                         proj4string = CRS("+init=epsg:4326"))
+## Smooth temp values using a Fourier basis with 65 functions 
+## github: JamesRamsay5/fda/man/fRegress.Rd
+daybasis65 <- create.fourier.basis(rangeval=c(0, 365), nbasis=65, period = 365,
+                                   axes=list('axesIntervals'))
 
-coords1 <- spTransform(coords1, canada.CRS) %>% st_as_sf()
-XY_m1 <- st_coordinates(coords1)   
-X_m1 <- XY_m1[,1]; Y_m1 <- XY_m1[,2]
-X_km1 <- X_m1/1000; Y_km1 <- Y_m1/1000
-XY_km1 <- matrix(c(X_km1, Y_km1), nc = 2)
+Temp.fd <- with(CanadianWeather, 
+                smooth.basisPar(day.5,dailyAv[,,'Temperature.C'], daybasis65)$fd)
 
-# 2. chatGPT para Canada (epsg:3978)
-coords_sf <- st_as_sf(coords_df, coords = c("lon", "lat"), crs = 4326)  # WGS84
-coords2 <- st_transform(coords_sf, 3978) 
-XY_m2 <- st_coordinates(coords2)   
-X_m2 <- XY_m2[,1]; Y_m2 <- XY_m2[,2]
-X_km2 <- X_m2/1000; Y_km2 <- Y_m2/1000
-XY_km2 <- matrix(c(X_km2, Y_km2), nc = 2)
-
-# 3. convertlatlong2UTM: coordenadas planas
-CanadianWeather_planar = coords_df
-CanadianWeather$coordinates[,2] = -CanadianWeather$coordinates[,2]
-
-for(i in 1:nrow(CanadianWeather$coordinates)){
-  CanadianWeather_planar[i,] = as.data.frame(CanadianWeather$coordinates)[i,] %>%
-    st_as_sf(.,coords=c("W.longitude", "N.latitude"), crs = 4326) %>%
-    st_transform(crs = convertlatlong2UTM(.)) %>%
-    st_coordinates()}
-
-#CanadianWeather_planar = as.data.frame(CanadianWeather_planar) %>% 
-#  `colnames<-`(c("W.longitude", "N.latitude"))
-
-XY_m3 <- CanadianWeather_planar
-X_m3 <- XY_m3[,1]; Y_m3 <- XY_m3[,2]
-X_km3 <- X_m3/1000; Y_km3 <- Y_m3/1000
-XY_km3 <- matrix(c(X_km3, Y_km3), nc = 2)
-
-# Smooth temp values using a Fourier basis with 65 functions 
-nbasis <- 65
-Temp <- CanadianWeather$dailyAv[, , "Temperature.C"]
-day.range <- c(1, 365)
-Temp.basis <- create.fourier.basis(rangeval = day.range, nbasis = nbasis)
-Temp.fd <- smooth.basis(argvals = 1:365, y = Temp, fdParobj = Temp.basis)$fd
 plot(Temp.fd)
-
-#daybasis65 <- create.fourier.basis(rangeval=c(0, 365), nbasis=65, period = 365,
-#                                   axes=list('axesIntervals'))
-#Temp.fd <- with(CanadianWeather, smooth.basisPar(day.5,
-#                                                 dailyAv[,,'Temperature.C'], daybasis65)$fd)
-#
-#plot(Temp.fd)
-
-
-#coord = as.data.frame(CanadianWeather$coordinates)
-#fRegress(CanadianWeather$coordinates)
-#coords = as.data.frame(coords)
-
-## 6.2 Remover la tendencia espacial con el modelo de regresión funcional ------
+## Remove spatial trend using functional regression model 
+## (Eq 12) Giraldo, R., Delicado, P., & Mateu, J. (2012). Hierarchical clustering of spatially correlated functional data. Statistica Neerlandica, 66(4), 403-421.
 ## X_i(t) = \alpha(t) + \beta_1(t) Longitude_i + \beta_2(t) Latitude_i + e_i (t)
 
-#TempRgn.f <- fRegress(Temp.fd ~ N.latitude + W.longitude , coord)
-TempRgn.fm0 <- fRegress(Temp.fd ~ X_m0 + X_m0)
-TempRgn.fkm0 <- fRegress(Temp.fd ~ X_km0 + X_km0)
-
-TempRgn.fm1 <- fRegress(Temp.fd  ~ X_m1 + X_m1)
-TempRgn.fkm1 <- fRegress(Temp.fd  ~ X_km1 + X_km1)
-
-TempRgn.fm2 <- fRegress(Temp.fd ~ X_m2 + X_m2) # !!! In eigchk(Cmat) : Near singularity in coefficient matrix.
-TempRgn.fkm2 <- fRegress(Temp.fd ~ X_km2 + X_km2)
-
-TempRgn.fm3 <- fRegress(Temp.fd ~ X_m3 + X_m3) # !!! In eigchk(Cmat) : Near singularity in coefficient matrix.
-TempRgn.fkm3 <- fRegress(Temp.fd ~ X_km3 + X_km3)
-#TempRgn.f <- fRegress(Temp.fd ~ coords.x1 + coords.x2 , coords)
-#TempRgn.f2 <- fRegress(Temp.fd ~ N.latitude + W.longitude , CanadianWeather_planar)
-
-## 6.3 Obtiene los residuales del modelo funcional -----------------------------
-
-#fdobj.res = TempRgn.f$yfdobj-TempRgn.f$yhatfdobj
-#fdobj.res = Temp.fd-TempRgn.f$yhatfdobj
-fdobj.res_m0 = Temp.fd-TempRgn.fm0$yhatfdobj
-fdobj.res_km0 = Temp.fd-TempRgn.fkm0$yhatfdobj
-
-fdobj.res_m1 = Temp.fd-TempRgn.fm1$yhatfdobj
-fdobj.res_km1 = Temp.fd-TempRgn.fkm1$yhatfdobj
-
-fdobj.res_m2 = Temp.fd-TempRgn.fm2$yhatfdobj
-fdobj.res_km2 = Temp.fd-TempRgn.fkm2$yhatfdobj
-
-fdobj.res_m3 = Temp.fd-TempRgn.fm3$yhatfdobj
-fdobj.res_km3 = Temp.fd-TempRgn.fkm3$yhatfdobj
-
-plot(fdobj.res_m0)
-#summary(TempRgn.f)
-
-# evalua los residuales
-day_grid <- 1:365
-res_m0 <- eval.fd(day_grid, fdobj.res_m0)
-res_km0 <- eval.fd(day_grid, fdobj.res_km0)
-
-res_m1 <- eval.fd(day_grid, fdobj.res_m1)
-res_km1 <- eval.fd(day_grid, fdobj.res_km1)
-
-res_m2 <- eval.fd(day_grid, fdobj.res_m2)
-res_km2 <- eval.fd(day_grid, fdobj.res_km2)
-
-res_m3 <- eval.fd(day_grid, fdobj.res_m3)
-res_km3 <- eval.fd(day_grid, fdobj.res_km3)
-
-## 6.4 Ajusta la función okfd -------------------------------------------------
-# Fit a spherical model to the estimated trace-variogram by using the OLS technique
-coords.cero <- data.frame(Lon = -64.06, Lat = 44.79)
-
-okfd.res_m0 <- okfd(new.coords = coords.cero, coords=XY_m0,
-                    data=res_m0, 
-                    smooth.type='fourier', nbasis=65, argvals=day.5,
-                    fix.nugget=FALSE, fix.kappa=FALSE)
-
-okfd.res_m0$trace.vari.array[[1]] # spherical: 40751.21 y 25.44
-
-okfd.res_km0 <- okfd(new.coords = coords.cero, coords=XY_km0,
-                    data=res_km0, 
-                    smooth.type='fourier', nbasis=65, argvals=day.5,
-                    fix.nugget=FALSE, fix.kappa=FALSE)
-
-okfd.res_km0$trace.vari.array[[1]] # spherical: 4.537189e+04 y 2.873431e-02
-
-okfd.res_m1 <- okfd(new.coords = coords.cero, coords=XY_m1,
-                    data=res_m1, 
-                    smooth.type='fourier', nbasis=65, argvals=day.5,
-                    fix.nugget=TRUE, nugget = 0, fix.kappa=FALSE)
-
-okfd.res_m1$trace.vari.array[[1]] # spherical: 16533.4686  y 65.1114
-
-okfd.res_km1 <- okfd(new.coords = coords.cero, coords=XY_km1,
-                    data=res_km1, 
-                    smooth.type='fourier', nbasis=65, argvals=day.5,
-                    fix.nugget=TRUE, nugget = 0, fix.kappa=FALSE)
-
-okfd.res_km1$trace.vari.array[[1]] # spherical: 1.860350e+04 y 6.161156e-02
-
-okfd.res_m2 <- okfd(new.coords = coords.cero, coords=XY_m2,
-                    data=res_m2, 
-                    smooth.type='fourier', nbasis=65, argvals=day.5,
-                    fix.nugget=FALSE, fix.kappa=FALSE)
-
-okfd.res_m2$trace.vari.array[[1]] # spherical: 43814 y 2674732
-
-okfd.res_km2 <- okfd(new.coords = coords.cero, coords=XY_km2,
-                     data=res_km2, 
-                     smooth.type='fourier', nbasis=65, argvals=day.5,
-                     fix.nugget=TRUE, nugget = 0, fix.kappa=FALSE)
-
-okfd.res_km2$trace.vari.array[[1]] # spherical: 1.860350e+04 y 6.161156e-02
-
-okfd.res_m3 <- okfd(new.coords = coords.cero, coords=XY_m3,
-                    data=res_m3, 
-                    smooth.type='fourier', nbasis=65, argvals=day.5,
-                    fix.nugget=FALSE, fix.kappa=FALSE)
-
-okfd.res_m3$trace.vari.array[[1]] # spherical: 43814 y 2674732
-
-okfd.res_km3 <- okfd(new.coords = coords.cero, coords=XY_km3,
-                    data=res_km3, 
-                    smooth.type='fourier', nbasis=65, argvals=day.5,
-                    fix.nugget=FALSE, fix.kappa=FALSE)
-
-okfd.res_km3$trace.vari.array[[1]] # spherical: 43814 y 2674732
-
-
-okfd.res$trace.vari.array[[1]] # spherical: 8034.03 y 22.08
-okfd.res$trace.vari.array[[4]] # 8034.03 y 22.08
-
-plot(okfd.res)
-
-## 6.5 Ajusta la función fit.tracevariog --------------------------------------
-M0 <- fourierpen(fdobj.res_m0$basis,  Lfdobj=0)
-res.fd_m0 <- smooth.basis(argvals = 1:365, y = res_m0, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res_m0$coefs), res.fd_m0, M0)
-
-new.emp.trace.vari_m0 <- trace.variog(coords=XY_m0,
-                                      L2norm=L2norm, bin=FALSE)
-
-fit_m0 = geofd::fit.tracevariog(new.emp.trace.vari_m0, models = "spherical",
-                                sigma2.0 = 15000, phi.0 = 250,
-                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                                max.dist.variogram=NULL)
-
-fit_m0$best$cov.pars # 40750.55, 25.44
-
-kM0 <- fourierpen(fdobj.res_km0$basis,  Lfdobj=0)
-res.fd_km0 <- smooth.basis(argvals = 1:365, y = res_km0, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res_km0$coefs), res.fd_km0, kM0)
-
-new.emp.trace.vari_km0 <- trace.variog(coords=XY_km0,
-                                       L2norm=L2norm, bin=FALSE)
-
-fit_km0 = geofd::fit.tracevariog(new.emp.trace.vari_km0, models = "spherical",
-                                sigma2.0 = 15000, phi.0 = 250,
-                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                                max.dist.variogram=NULL)
-
-fit_km0$best$cov.pars # 2.356310e+04 y 1.807513e-02
-
-M1 <- fourierpen(fdobj.res_m1$basis,  Lfdobj=0)
-res.fd_m1 <- smooth.basis(argvals = 1:365, y = res_m1, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res_m1$coefs), res.fd_m1, M1)
-
-new.emp.trace.vari_m1 <- trace.variog(coords=XY_m1,
-                                      L2norm=L2norm, bin=FALSE)
-
-fit_m1 = geofd::fit.tracevariog(new.emp.trace.vari_m1, models = "spherical",
-                                sigma2.0 = 16500, phi.0 = 66,
-                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                                max.dist.variogram=NULL)
-
-fit_m1$best$cov.pars # 8033, 22.08
-
-kM1 <- fourierpen(fdobj.res_km1$basis,  Lfdobj=0)
-res.fd_km1 <- smooth.basis(argvals = 1:365, y = res_km1, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res_km1$coefs), res.fd_km1, kM1)
-
-new.emp.trace.vari_km1 <- trace.variog(coords=XY_km1,
-                                       L2norm=L2norm, bin=FALSE)
-
-fit_km1 = geofd::fit.tracevariog(new.emp.trace.vari_km1, models = "spherical",
-                                 sigma2.0 = 15000, phi.0 = 250,
-                                 fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                                 max.dist.variogram=NULL)
-
-fit_km1$best$cov.pars # 1.835429e+04  y 6.079655e-02
-
-M2 <- fourierpen(fdobj.res_m2$basis,  Lfdobj=0)
-res.fd_m2 <- smooth.basis(argvals = 1:365, y = res_m2, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res_m2$coefs), res.fd_m2, M2)
-
-new.emp.trace.vari_m2 <- trace.variog(coords=XY_m2,
-                                      L2norm=L2norm, bin=FALSE)
-
-fit_m2 = geofd::fit.tracevariog(new.emp.trace.vari_m2, models = "spherical",
-                                sigma2.0 = 16500, phi.0 = 66,
-                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                                max.dist.variogram=NULL)
-
-fit_m2$best$cov.pars # 8033, 22.08
-
-kM2 <- fourierpen(fdobj.res_km2$basis,  Lfdobj=0)
-res.fd_km2 <- smooth.basis(argvals = 1:365, y = res_km2, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res_km2$coefs), res.fd_km2, kM2)
-
-new.emp.trace.vari_km2 <- trace.variog(coords=XY_km2,
-                                       L2norm=L2norm, bin=FALSE)
-
-fit_km2 = geofd::fit.tracevariog(new.emp.trace.vari_km2, models = "spherical",
-                                 sigma2.0 = 15000, phi.0 = 250,
-                                 fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                                 max.dist.variogram=NULL)
-
-fit_km2$best$cov.pars # 1.835429e+04  y 6.079655e-02
-
-M3 <- fourierpen(fdobj.res_m3$basis,  Lfdobj=0)
-res.fd_m3 <- smooth.basis(argvals = 1:365, y = res_m3, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res_m3$coefs), res.fd_m3, M3)
-
-new.emp.trace.vari_m3 <- trace.variog(coords=XY_m3,
-                                      L2norm=L2norm, bin=FALSE)
-
-fit_m3 = geofd::fit.tracevariog(new.emp.trace.vari_m3, models = "spherical",
-                                sigma2.0 = 16500, phi.0 = 100,
-                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                                max.dist.variogram=NULL)
-
-fit_m3$best$cov.pars # 8033, 22.08
-
-kM3 <- fourierpen(fdobj.res_km3$basis,  Lfdobj=0)
-res.fd_km3 <- smooth.basis(argvals = 1:365, y = res_km3, fdParobj = Temp.basis)$fd
-L2norm = l2.norm(ncol(fdobj.res_km3$coefs), res.fd_km3, kM3)
-
-new.emp.trace.vari_km3 <- trace.variog(coords=XY_km3,
-                                       L2norm=L2norm, bin=FALSE)
-
-fit_km3 = geofd::fit.tracevariog(new.emp.trace.vari_km3, models = "spherical",
-                                 sigma2.0 = 15000, phi.0 = 250,
-                                 fix.nugget=TRUE, nugget=0, fix.kappa=FALSE,
-                                 max.dist.variogram=NULL)
-
-fit_km3$best$cov.pars # 4371399.4  y 165403.4
-
-
-plot(new.emp.trace.vari1$u, new.emp.trace.vari1$v)
-
-# Ejemplo geofd: An R Package for Function-Valued Geostatistical Prediction ----
-data(maritimes.coords)
-data(maritimes.data)
-
-head(maritimes.coords)
-head(maritimes.data[,1:4], n=5)
-# data set is smoothed by using a B-splines basis with 65 functions without penalization
-
-n <- dim(maritimes.data)[1]
-argvals<-seq(1,n, by=1)
-
-# parameters for smoothing the data
-s<-35
-rangeval <- range(argvals)
-norder <- 4
-nbasis <- 65
-bspl.basis <- create.bspline.basis(rangeval, nbasis, norder)
-lambda <-0
-datafdPar <- fdPar(bspl.basis, Lfdobj=2, lambda)
-smfd <- smooth.basis(argvals,maritimes.data,datafdPar)
-datafd <- smfd$fd
-
-# calculate the L2 norm between the smoothed curves
-
-# s: number of sites where curves are observed, 
-# datafd: a functional data object representing a smoothed data set
-# M: a symmetric matrix of order equal to the number of basis functions defined by the B-splines basis object
-
-M <- bsplinepen(bspl.basis,Lfdobj=0)
-L2norm <- l2.norm(s, datafd, M)
-
-# coords: the geographical coordinates in decimal degrees
-# L2norm: a matrix whose values are the L2 norm between all pair of smoothed functions (an output from the function l2.norm)
-# bin: which is a logical argument indicating whether the output is a binned variogram, 
-# maxdist: a numerical value defining the maximum distance for calculating the trace-variogram.
-# uvec, breaks and nugget.tolerance: defined as in the function variog of the package geoR.
-
-dista=max(dist(maritimes.coords))*0.9
-tracev=trace.variog(maritimes.coords, L2norm, bin=FALSE,
-                    max.dist=dista,uvec="default",breaks="default",nugget.tolerance)
-
-# fit a theoretical model to the estimated trace-variogram
-
-# tracev: estimations of the trace-variogram function (an output of the function trace.variog)
-# model: list vwith the models that we want to fit
-# some initial values for the parameters in these models
-
-models=fit.tracevariog(tracev, models=c("spherical","exponential",
-                                        "gaussian","matern"),sigma2.0=2000, phi.0=4, fix.nugget=FALSE,
-                       nugget=0, fix.kappa=TRUE, kappa=1, max.dist.variogram=dista)
-
-models$fitted[[1]] # spherical, cov.pars: 2112.12   5.66     
-models$fitted[[2]] # exponential, cov.pars: 3333.32   5.12    
-models$fitted[[3]] # gaussian, cov.pars: 1810.90    2.51
-models$fitted[[4]] # matern, cov.pars: 2346.85 1.83
+## (Cap 10) Ramsay, J., Hooker, G., Graves, S. (2009). Functional Linear Models for Scalar Responses. In: Functional Data Analysis with R and MATLAB. Use R. Springer, New York, NY. https://doi.org/10.1007/978-0-387-98185-7_9
+# xfdlist: list of independent variables
+xfdList <- list(const = rep(1, 35), 
+                N.latitude = coords_$N.latitude,
+                W.longitude = coords_$W.longitude)
+
+#xfdList_ <- list(const = rep(1, 35), 
+#                 N.latitude = CanadianWeather_planar$N.latitude,
+#                 W.longitude = CanadianWeather_planar$W.longitude)
+
+# betalist : functional parameter objects (class fdPar) defining the regression functions to be estimated.
+alphabasis <- create.constant.basis(c(0, 365),65)
+betabasis = create.fourier.basis(c(0, 365), 65)
+betafdPar = fdPar(betabasis)
+betaList = vector("list",3)
+betaList[[1]] = fdPar(alphabasis)
+for (j in 1:2) betaList[[j+1]] = betafdPar
+
+TempRgn.f0 <- fRegress(Temp.fd ~ N.latitude + W.longitude, data = coords_)
+TempRgn.f <- fRegress(Temp.fd ~ N.latitude + W.longitude, 
+                      data = coords_,
+                      xfdlist = xfdList, 
+                      betalist = betaList)
+
+# modelo de regresión con coord planas
+#TempRgn.f_ <- fRegress(Temp.fd ~ N.latitude + W.longitude, 
+#                       data = CanadianWeather_planar,
+#                       xfdlist = xfdList_, 
+#                       betalist = betaList)
+
+# TempRgn.f1 <- fRegress(Temp.fd, xfdlist = xfdList, betalist = betaList)
+# all.equal(TempRgn.f, TempRgn.f1) # es igual a TempRgn.f
+
+fdobj.res_0 = Temp.fd-TempRgn.f0$yhatfdobj
+fdobj.res = Temp.fd-TempRgn.f$yhatfdobj
+#fdobj.res_ = Temp.fd-TempRgn.f_$yhatfdobj
+
+plot(fdobj.res_0)
+plot(fdobj.res)
+plot(fdobj.res_)
+
+# Computes the matrix defining the roughness penalty for functions expressed in terms of a Fourier basis.
+M_pen <- fourierpen(fdobj.res$basis, Lfdobj=0)
+# suavizar un objeto fd
+res.smooth <- smooth.basis(argvals = 1:365, 
+                           y = eval.fd(day.5, fdobj.res), 
+                           fdParobj = daybasis65)$fd
+
+# residuales modelo con coord planas
+#res.smooth_ <- smooth.basis(argvals = 1:365, 
+#                            y = eval.fd(day.5, fdobj.res_), 
+#                            fdParobj = daybasis65)$fd
+
+# Calculates L2 norm among functions
+L2norm = l2.norm(s = ncol(fdobj.res$coefs), 
+                 datafd = res.smooth, 
+                 M = M_pen)
+
+# Norma L2 de los residuales suavizados coord planas
+#L2norm_ = l2.norm(s = ncol(fdobj.res_$coefs), 
+#                  datafd = res.smooth_, 
+#                  M = M_pen)
+ 
+# Empirical Variograms for function-value data
+dista=max(dist(coords_))*0.9
+tracev=trace.variog(coords_, L2norm, bin=FALSE, max.dist=dista)
+
+tracev$Eu.d
+models=fit.tracevariog(emp.trace.vari = tracev, 
+                       models = "spherical",
+                       sigma2.0=quantile(tracev$v, 0.75), 
+                       phi.0=quantile(tracev$Eu.d, 0.75), # initial values
+                       fix.nugget=TRUE, nugget=0, 
+                       fix.kappa=FALSE#,max.dist.variogram=dista
+                       )
+
+models$best$cov.pars #$cov.pars #[1] 8366.59256   22.52043
+
+# Coord planas: Empirical Variograms for function-value data
+dista_=max(dist(CanadianWeather_planar))*0.9
+tracev_=trace.variog(CanadianWeather_planar, L2norm, bin=FALSE, max.dist=dista_)
+#tracev_=trace.variog(CanadianWeather_planar, L2norm_, bin=FALSE, max.dist=dista_)
+plot(tracev_$u, tracev_$v)
+
+models_=fit.tracevariog(emp.trace.vari = tracev_, 
+                       models = "spherical",
+                       sigma2.0=quantile(tracev_$v, 0.25), 
+                       phi.0=quantile(tracev_$Eu.d, 0.75), # initial values
+                       fix.nugget=TRUE, nugget=0, 
+                       fix.kappa=FALSE#, max.dist.variogram=dista_
+                       )
+
+models_$best$cov.pars # $cov.pars #[1] 8296.055 1755842.603
+#$cov.pars #[1]  17389.2 1953483.6 # con L2norm_ (residuales modelo regresión funcional con coord planas)
+
+tracev_$Eu.d # matrix de distancias h
+
+max(tracev_$Eu.d/1000)
+
+f_trace_variog <- function(sigmasq, phi, M){
+  # spherical model
+  M = M/1000 # convierte a Km
+  n = nrow(M); p = ncol(M)
+  M_ = matrix(rep(0, n*p), nr = n, nc =p)
+  for(i in 1:n){
+    for(j in 1:p){
+      if(i>j){
+        #M_[i,j] = ifelse(M[i,j] <= phi, sigmasq*(((1.5*M[i,j])/phi) - 0.5*((M[i,j]/phi)^3)),sigmasq)
+        M_[i,j] = ifelse(M[i,j] <= phi, (((1.5*M[i,j])/phi) - 0.5*((M[i,j]/phi)^3)),1)
+      }else{M_[i,j] = 0}
+    }
+  }
+ return(M_) 
+}
+
+Gamma_h = f_trace_variog(7769, 2184, tracev_$Eu.d)
+Gamma_h2 = f_trace_variog(8296, 1756, tracev_$Eu.d)
+
+View(Gamma_h)
+
+L2norm_ = l2.norm(s = ncol(Temp.fd$coefs), 
+                  datafd = Temp.fd, 
+                  M = M_pen)
+
+Gamma_norm = Gamma_h/max(Gamma_h) # se parece a Gamma/sigma2
+# multiplicative weighting
+
+#wtv_ = sqrt(Gamma_h*sqrt(L2norm_)) # params paper
+wtv_ = sqrt(L2norm_)/sqrt(Gamma_h) # params paper
+#D_weighted <- D_weighted * (max(D_L2) / max(D_weighted))
+row.names(wtv_) = CanadianWeather$place
+WTV <- as.dist(wtv_)
+hc <- hclust(WTV, method = "complete", members = NULL)
+plot(hc, hang = -1)
+
+  # inverse weighting
+wtv_inv = sqrt(L2norm_)/(1+Gamma_h2) # params paper
+wtv_inv_ <- wtv_inv * (max(sqrt(L2norm_)) / max(wtv_inv))
+#wtv_inv = sqrt(L2norm_)/(1+Gamma_norm) # params paper
+row.names(wtv_inv_) = CanadianWeather$place
+WTV_inv_ = as.dist(wtv_inv_)
+hc_inv_ <- hclust(WTV_inv_, method = "complete", members = NULL)
+plot(hc_inv_, hang = -1)
+
+# additive / normalized weighting
+wtv_add = sqrt(L2norm_)*(1+(Gamma_h/max(Gamma_h))) # params paper
+#wtv_add = sqrt(L2norm_)*(1+(Gamma_norm)) # params paper
+wtv_add_ <- (wtv_add/max(wtv_add))*100
+#wtv_add_ = wtv_add * (max(sqrt(L2norm_)) / max(wtv_add))
+row.names(wtv_add_) = CanadianWeather$place
+WTV_add_ = as.dist(wtv_add_)
+hc_add_ <- hclust(WTV_add_, method = "complete", members = NULL)
+plot(hc_add_, hang = -1)
+
+# element-by-element multiplication ----
+
+wtv_2 = Gamma_h2*sqrt(L2norm_) # params fda::CanadianWeather
+sqrt_L2 = sqrt(L2norm_)
+
+row.names(wtv_2) = CanadianWeather$place
+row.names(sqrt_L2) = CanadianWeather$place
+
+WTV2 <- as.dist(wtv_2)
+
+hc0 = hclust(as.dist(sqrt_L2), method = "complete", members = NULL)
+hc2 <- hclust(WTV2, method = "complete", members = NULL)
+
+
+plot(hc0, hang = -1)
+plot(hc2, hang = -1)
+
+# cluster quality measures
+k_range <- 2:25
+
+# crea lista con los labels para cada corte de k grupos ----
+clusters <- lapply(k_range, function(k) cutree(hc, k = k))
+names(clusters) <- paste0("k_", k_range)
+
+clusters2 <- lapply(k_range, function(k) cutree(hc2, k = k))
+names(clusters2) <- paste0("k_", k_range)
+
+sil_width <- sapply(clusters, function(cl) {
+  mean(silhouette(x = cl, dist = WTV)[, 3])
+})
+
+sil_width2 <- sapply(clusters2, function(cl) {
+  mean(silhouette(x = cl, dist = WTV2)[, 3])
+})
+
+clust_qidx <- data.frame(
+  n_clust = k_range,
+  Silhouette = sil_width,
+  Silhouette2 = sil_width2)
+
+sil_wtv <- ggplot(clust_qidx)+
+  geom_line(aes(x = n_clust, y = Silhouette))+
+  scale_x_continuous(breaks = seq(2, 25, 1)) +
+  theme_minimal() + 
+  labs(y = 'Average silhouette width', x = 'Number of clusters k')+ 
+  theme(strip.text = element_text(size = 24, face = "bold"),
+        axis.text = element_text(size = 24),
+        axis.title = element_text(size = 24), 
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_line(color = "lightgrey", size = 0.25))+ 
+  annotate(geom = "text", x = 15, y = 0.9, 
+           label = "Params paper", 
+           size = 10) +
+  annotate(geom = "text", x = 15, y = 0.85, 
+           label = as.character(expression(phi == 2184 ~ ', ' ~ sigma^2 == 7769)), 
+           parse = TRUE,
+           size = 10) 
+
+sil_wtv2 <- ggplot(clust_qidx)+
+  geom_line(aes(x = n_clust, y = Silhouette2), color = 'blue')+
+  scale_x_continuous(breaks = seq(2, 25, 1)) +
+  theme_minimal() + 
+  labs(y = 'Average silhouette width', x = 'Number of clusters k')+ 
+  theme(strip.text = element_text(size = 24, face = "bold"),
+        axis.text = element_text(size = 24),
+        axis.title = element_text(size = 24),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_line(color = "lightgrey", size = 0.25))+ 
+  annotate(geom = "text", x = 15, y = 0.9, 
+           label = "Params fda::CanadianWeather", 
+           size = 10) +
+  annotate(geom = "text", x = 15, y = 0.85, 
+           label = as.character(expression(phi == 1756 ~ ', ' ~ sigma^2 == 8296)), 
+           parse = TRUE,
+           size = 10) 
+
+grid.arrange(sil_wtv, sil_wtv2, ncol = 2,
+             top = textGrob(
+               "",
+               gp = gpar(fontsize = 24, fontface = "bold")
+             ))
+
+# dendograma -----
+dend_data0 <- dendro_data(hc0, type = "rectangle")
+h_cut0 <- hc0$height[nrow(sqrt_L2) - 9] + 1e01
+
+dnd_L2 =  ggplot() +
+  geom_segment(data = dend_data0$segments,
+               aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_text(data = dend_data$labels,
+            aes(x = x, y = y, label = label),
+            hjust = 1, angle = 90, size = 6) +
+  geom_hline(yintercept = h_cut0, 
+             color = "red", 
+             linewidth = 1, 
+             linetype = "dashed") +
+  coord_cartesian(ylim = c(-2e02, 6.5e02))+
+  #coord_flip() +  # Flip to match base R's orientation
+  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
+  theme_minimal() +
+  labs(title = "Smoothed",
+       y = "Height", x = "Stations")+
+  theme(axis.title = element_text(size = 16))
+
+dend_data <- dendro_data(hc, type = "rectangle")
+h_cut <- hc$height[nrow(wtv_) - 9] + 2 #+ 1e04
+
+# Plot dendrogram with ggplot2
+dnd_wtv =  ggplot() +
+  geom_segment(data = dend_data$segments,
+               aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_text(data = dend_data$labels,
+            aes(x = x, y = y, label = label),
+            hjust = 1, angle = 90, size = 6) +
+  geom_hline(yintercept = h_cut, 
+             color = "red", 
+             linewidth = 1, 
+             linetype = "dashed") +
+  #coord_cartesian(ylim = c(-7e05, 4.5e06))+
+  coord_cartesian(ylim = c(-2e02, 5.5e02))+
+  #coord_flip() +  # Flip to match base R's orientation
+  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
+  theme_minimal() +
+  labs(title = "Weighted by trace-variogram",
+       y = "Height", x = "Stations")+
+  theme(axis.title = element_text(size = 16))
+
+dend_data2 <- dendro_data(hc2, type = "rectangle")
+h_cut2 <- hc2$height[nrow(wtv_2) - 9] + 2
+
+dnd_wtv2 =  ggplot() +
+  geom_segment(data = dend_data2$segments,
+               aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_text(data = dend_data$labels,
+            aes(x = x, y = y, label = label),
+            hjust = 1, angle = 90, size = 6) +
+  geom_hline(yintercept = h_cut2, 
+             color = "red", 
+             linewidth = 1, 
+             linetype = "dashed") +
+  #coord_cartesian(ylim = c(-7e05, 4.5e06))+
+  coord_cartesian(ylim = c(-2e02, 5.5e02))+
+  #coord_flip() +  # Flip to match base R's orientation
+  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
+  theme_minimal() +
+  labs(title = "Weighted by trace-variogram",
+       y = "Height", x = "Stations")+
+  theme(axis.title = element_text(size = 16))
+
+dend_data_inv <- dendro_data(hc_inv, type = "rectangle")
+h_cut_inv <- hc_inv$height[nrow(wtv_inv) - 9] + 2 #+ 1e04
+
+# Plot dendrogram with ggplot2
+dnd_wtv_inv =  ggplot() +
+  geom_segment(data = dend_data_inv$segments,
+               aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_text(data = dend_data$labels,
+            aes(x = x, y = y, label = label),
+            hjust = 1, angle = 90, size = 6) +
+  geom_hline(yintercept = h_cut_inv, 
+             color = "red", 
+             linewidth = 1, 
+             linetype = "dashed") +
+  #coord_cartesian(ylim = c(-7e05, 4.5e06))+
+  coord_cartesian(ylim = c(-1e02, 2.5e02))+
+  #coord_flip() +  # Flip to match base R's orientation
+  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
+  theme_minimal() +
+  labs(title = "Weighted by trace-variogram",
+       y = "Height", x = "Stations")+
+  theme(axis.title = element_text(size = 16))
+
+memb0 <- cutree(hc0, k = 9)
+memb <- cutree(hc, k = 9)
+memb2 <- cutree(hc2, k = 9)
+
+# condicional identificando clusters del paper
+memb0 = ifelse(memb0==1,5, 
+               ifelse(memb0==2, 6,
+                      ifelse(memb0==3, 8,
+                             ifelse(memb0==4, 7,
+                                    ifelse(memb0==5, 4, 
+                                           ifelse(memb0==6, 9,
+                                                  ifelse(memb0==7, 3,
+                                                         ifelse(memb0==8,2, 1))))))))
+
+coords_2  = mutate(coords_, clust_L2 = memb0, clust_wtv = memb, clust_wtv2 = memb2)
+
+map_L2 <- ggplot() +
+  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
+               color = "lightgray", fill = NA) +
+  geom_text(data = coords_2, 
+            aes(x = W.longitude, y = N.latitude, label = clust_L2), size = 8)+
+  theme_bw()
+
+map_wtv <- ggplot() +
+  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
+               color = "lightgray", fill = NA) +
+  geom_text(data = coords_2, 
+            aes(x = W.longitude, y = N.latitude, label = clust_wtv), size = 8)+
+  theme_bw()
+
+map_wtv2 <- ggplot() +
+  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
+               color = "lightgray", fill = NA) +
+  geom_text(data = coords_2, 
+            aes(x = W.longitude, y = N.latitude, label = clust_wtv2), size = 8)+
+  theme_bw()
+
+grid.arrange(dnd_L2, map_L2, ncol = 2,
+             top = textGrob(
+               "",
+               gp = gpar(fontsize = 24, fontface = "bold")
+             ))
+
+grid.arrange(dnd_wtv, map_wtv, ncol = 2,
+             top = textGrob(
+               "",
+               gp = gpar(fontsize = 24, fontface = "bold")
+             ))
+
+grid.arrange(dnd_wtv2, map_wtv2, ncol = 2,
+             top = textGrob(
+               "",
+               gp = gpar(fontsize = 24, fontface = "bold")
+             ))
