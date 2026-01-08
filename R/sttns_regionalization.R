@@ -4,9 +4,8 @@ library(lubridate)
 library(factoextra)
 library(cluster)
 library(sf)
-library(gridExtra)
+library(gridExtra) # grid.arrange
 library(tidyr)
-library(gridExtra)
 library(grid)
 
 library(MASS)
@@ -33,7 +32,7 @@ library(maps) # mapa de Canada
 library(ggrepel) # avoid overlap labels in map
 library(clusterSim) # clusted quality measures
 library(factoextra)
-library(cluster)
+library(cluster) # silhouette
 library(clusterCrit) # clusted quality index
 library(ggdendro)
 
@@ -1789,25 +1788,36 @@ load('clust_sttns_dtwclust.RData')
 data(CanadianWeather, package="fda")
 str(CanadianWeather, max.level = 1)
 
+# coords_: data frame con coordenadas para regresión funcional
 coords_ <- data.frame(W.longitude = -CanadianWeather$coordinates[, "W.longitude"], 
                       N.latitude = CanadianWeather$coordinates[, "N.latitude"])
 
 #CanadianWeather$coordinates[,2] = -CanadianWeather$coordinates[,2]
 
+# Canada_weather: sf data frame para graficar geom_sf
 Canada_weather = data.frame(place = CanadianWeather$place,
                             lat = CanadianWeather$coordinates[,1],
                             lon = -CanadianWeather$coordinates[,2]) %>% 
   st_as_sf(coords=c("lon", "lat"), crs =4326)
 
-# EPSG:3347 — NAD83 / Statistics Canada Lambert https://spatialreference.org/ref/epsg/3347/
-#Tipo: proyección cartográfica (plana)
-#Proyección: Lambert Conformal Conic
-#Unidades: metros
-#Extensión: todo Canadá
-#Propósito: análisis estadístico, cartografía nacional
+Canada_weather2 = data.frame(place = CanadianWeather$place,
+                             lat = CanadianWeather$coordinates[,1],
+                             lon = -CanadianWeather$coordinates[,2]) %>% 
+  mutate(lat = ifelse(place =="Charlottvl", 46.290, lat),
+         lon = ifelse(place =="Charlottvl", -63.118, lon)) %>% 
+  st_as_sf(coords=c("lon", "lat"), crs =4326)
+  
+## 5.1 CanadianWeather_planar: data frame con coordenadas planas en metros -----
+# https://epsg.io/?q=Canada
+# NAD 1983 Albers Canada
+# Data source: ESRI
+# Information source: ESRI
+# Description: NAD 1983 Albers Canada
 
-canada.CRS <- CRS("+init=epsg:3347") #
+canada.CRS <- CRS(SRS_string="ESRI:102001")
+#canada.CRS <- CRS("+init=epsg:3347") #
 #canada.CRS <- CRS("+init=epsg:4269") # 
+
 CanadianWeather_planar = coords_
 
 for(i in 1:nrow(coords_)){
@@ -1820,19 +1830,22 @@ for(i in 1:nrow(coords_)){
     st_coordinates()
 }
 
+# gráfico de estaciones de Canadá
 canada <- map("world", "Canada", fill = TRUE, plot = FALSE)
 # Graficar los bordes de Canadá
 ggplot() +
   geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
                color = "lightgray", fill = NA) +
-  geom_sf(data = Canada_weather, col = 'black') +
+  geom_sf(data = Canada_weather, 
+          col = ifelse(Canada_weather$place == "Charlottvl", "red", "black")) +
   geom_label_repel(data = Canada_weather, 
-                   aes(label = place, geometry = geometry),
+                   aes(label = place, colour = flag, geometry = geometry),
                    stat = "sf_coordinates",  # Extract coordinates from sf geometry
-                   size = 3)+
+                   size = 3,
+                   color = ifelse(Canada_weather$place == "Charlottvl", "red", "black"))+
   theme_bw()
 
-## Smooth temp values using a Fourier basis with 65 functions 
+## 5.2 smooth temp values using a Fourier basis with 65 functions --------------
 ## github: JamesRamsay5/fda/man/fRegress.Rd
 daybasis65 <- create.fourier.basis(rangeval=c(0, 365), nbasis=65, period = 365,
                                    axes=list('axesIntervals'))
@@ -1841,7 +1854,8 @@ Temp.fd <- with(CanadianWeather,
                 smooth.basisPar(day.5,dailyAv[,,'Temperature.C'], daybasis65)$fd)
 
 plot(Temp.fd)
-## Remove spatial trend using functional regression model 
+
+## 5.3 remove spatial trend using functional regression model ---------------------
 ## (Eq 12) Giraldo, R., Delicado, P., & Mateu, J. (2012). Hierarchical clustering of spatially correlated functional data. Statistica Neerlandica, 66(4), 403-421.
 ## X_i(t) = \alpha(t) + \beta_1(t) Longitude_i + \beta_2(t) Latitude_i + e_i (t)
 
@@ -1851,10 +1865,6 @@ xfdList <- list(const = rep(1, 35),
                 N.latitude = coords_$N.latitude,
                 W.longitude = coords_$W.longitude)
 
-#xfdList_ <- list(const = rep(1, 35), 
-#                 N.latitude = CanadianWeather_planar$N.latitude,
-#                 W.longitude = CanadianWeather_planar$W.longitude)
-
 # betalist : functional parameter objects (class fdPar) defining the regression functions to be estimated.
 alphabasis <- create.constant.basis(c(0, 365),65)
 betabasis = create.fourier.basis(c(0, 365), 65)
@@ -1863,195 +1873,302 @@ betaList = vector("list",3)
 betaList[[1]] = fdPar(alphabasis)
 for (j in 1:2) betaList[[j+1]] = betafdPar
 
+# fRegress: regresión con respuesta funcional y covariables escalares
 TempRgn.f0 <- fRegress(Temp.fd ~ N.latitude + W.longitude, data = coords_)
 TempRgn.f <- fRegress(Temp.fd ~ N.latitude + W.longitude, 
                       data = coords_,
                       xfdlist = xfdList, 
                       betalist = betaList)
 
+fdobj.res_0 = Temp.fd-TempRgn.f0$yhatfdobj
+fdobj.res = Temp.fd-TempRgn.f$yhatfdobj
+
+plot(fdobj.res_0)
+plot(fdobj.res)
+
 # modelo de regresión con coord planas
+#xfdList_ <- list(const = rep(1, 35), 
+#                 N.latitude = CanadianWeather_planar$N.latitude,
+#                 W.longitude = CanadianWeather_planar$W.longitude)
 #TempRgn.f_ <- fRegress(Temp.fd ~ N.latitude + W.longitude, 
 #                       data = CanadianWeather_planar,
 #                       xfdlist = xfdList_, 
 #                       betalist = betaList)
-
-# TempRgn.f1 <- fRegress(Temp.fd, xfdlist = xfdList, betalist = betaList)
-# all.equal(TempRgn.f, TempRgn.f1) # es igual a TempRgn.f
-
-fdobj.res_0 = Temp.fd-TempRgn.f0$yhatfdobj
-fdobj.res = Temp.fd-TempRgn.f$yhatfdobj
+#TempRgn.f_ <- fRegress(Temp.fd, xfdlist = xfdList_, betalist = betaList)
 #fdobj.res_ = Temp.fd-TempRgn.f_$yhatfdobj
 
-plot(fdobj.res_0)
-plot(fdobj.res)
-plot(fdobj.res_)
+#all.equal(TempRgn.f, TempRgn.f0) # es igual a TempRgn.f
 
-# Computes the matrix defining the roughness penalty for functions expressed in terms of a Fourier basis.
+## 5.4 smooth the functional residuals obtained after (spatial) detrending -----
+# fourierpen: Computes the matrix defining the roughness penalty for functions expressed in terms of a Fourier basis.
 M_pen <- fourierpen(fdobj.res$basis, Lfdobj=0)
 # suavizar un objeto fd
 res.smooth <- smooth.basis(argvals = 1:365, 
                            y = eval.fd(day.5, fdobj.res), 
                            fdParobj = daybasis65)$fd
 
+plot(res.smooth)
 # residuales modelo con coord planas
-#res.smooth_ <- smooth.basis(argvals = 1:365, 
-#                            y = eval.fd(day.5, fdobj.res_), 
+#res.smooth_ <- smooth.basis(argvals = 1:365, y = eval.fd(day.5, fdobj.res_), 
 #                            fdParobj = daybasis65)$fd
 
-# Calculates L2 norm among functions
-L2norm = l2.norm(s = ncol(fdobj.res$coefs), 
-                 datafd = res.smooth, 
-                 M = M_pen)
-
-# Norma L2 de los residuales suavizados coord planas
-#L2norm_ = l2.norm(s = ncol(fdobj.res_$coefs), 
-#                  datafd = res.smooth_, 
-#                  M = M_pen)
+## 5.5 fit spherical model to the estimated trace-variogram by OLS -------------
  
-# Empirical Variograms for function-value data
-dista=max(dist(coords_))*0.9
-tracev=trace.variog(coords_, L2norm, bin=FALSE, max.dist=dista)
-
-tracev$Eu.d
-models=fit.tracevariog(emp.trace.vari = tracev, 
-                       models = "spherical",
-                       sigma2.0=quantile(tracev$v, 0.75), 
-                       phi.0=quantile(tracev$Eu.d, 0.75), # initial values
-                       fix.nugget=TRUE, nugget=0, 
-                       fix.kappa=FALSE#,max.dist.variogram=dista
-                       )
-
-models$best$cov.pars #$cov.pars #[1] 8366.59256   22.52043
-
+# l2.norm: Calculates L2 norm among functions
+L2norm = l2.norm(s = ncol(fdobj.res$coefs), datafd = res.smooth, M = M_pen)
+# norma L2 de los residuales suavizados coord planas
+#L2norm_ = l2.norm(s = ncol(fdobj.res_$coefs), datafd = res.smooth_, M = M_pen)
+ 
 # Coord planas: Empirical Variograms for function-value data
-dista_=max(dist(CanadianWeather_planar))*0.9
-tracev_=trace.variog(CanadianWeather_planar, L2norm, bin=FALSE, max.dist=dista_)
-#tracev_=trace.variog(CanadianWeather_planar, L2norm_, bin=FALSE, max.dist=dista_)
-plot(tracev_$u, tracev_$v)
+dista = max(dist(CanadianWeather_planar))*0.9 # 4720003m -> 4720 Km
+tracev = trace.variog(CanadianWeather_planar, L2norm, bin=FALSE, max.dist=dista)
+#tracev_ = trace.variog(CanadianWeather_planar, L2norm_, bin=FALSE, max.dist=dista)
+# ajusta el semivariograma empirico convirtiendo coordenadas de metros a Km
+tracev2 = trace.variog(CanadianWeather_planar/1000, L2norm, bin=FALSE, max.dist=dista/1000)
 
-models_=fit.tracevariog(emp.trace.vari = tracev_, 
-                       models = "spherical",
-                       sigma2.0=quantile(tracev_$v, 0.25), 
-                       phi.0=quantile(tracev_$Eu.d, 0.75), # initial values
-                       fix.nugget=TRUE, nugget=0, 
-                       fix.kappa=FALSE#, max.dist.variogram=dista_
-                       )
+fit_spherical2 = fit.tracevariog(emp.trace.vari = tracev2, models = "spherical",
+                                sigma2.0=quantile(tracev2$v, 0.75), # initial values
+                                phi.0=quantile(tracev2$Eu.d, 0.75), # initial values
+                                fix.nugget=FALSE, fix.kappa=FALSE#, max.dist.variogram=dista_
+                                )
 
-models_$best$cov.pars # $cov.pars #[1] 8296.055 1755842.603
-#$cov.pars #[1]  17389.2 1953483.6 # con L2norm_ (residuales modelo regresión funcional con coord planas)
+#fit_spherical_ = fit.tracevariog(emp.trace.vari = tracev_, models = "spherical",
+#                                sigma2.0=quantile(tracev_$v, 0.25), 
+#                                phi.0=quantile(tracev_$Eu.d, 0.25), # initial values
+#                                fix.nugget=TRUE, nugget=0, fix.kappa=FALSE)
 
-tracev_$Eu.d # matrix de distancias h
+# obs: mismos resultados coord en metros y coord en Km
+#fit_spherical$best$cov.pars # $cov.pars #[1] 8306.419 1778014.677
+fit_spherical2$best$cov.pars # $cov.pars #[1] 8306.427 1778.015
+#fit_spherical_$best$cov.pars # $cov.pars #[1] 24541.71 2395529.64 # con L2norm_ (residuales modelo regresión funcional con coord planas)
 
-max(tracev_$Eu.d/1000)
-
-f_trace_variog <- function(sigmasq, phi, M){
-  # spherical model
-  M = M/1000 # convierte a Km
-  n = nrow(M); p = ncol(M)
-  M_ = matrix(rep(0, n*p), nr = n, nc =p)
-  for(i in 1:n){
-    for(j in 1:p){
-      if(i>j){
-        #M_[i,j] = ifelse(M[i,j] <= phi, sigmasq*(((1.5*M[i,j])/phi) - 0.5*((M[i,j]/phi)^3)),sigmasq)
-        M_[i,j] = ifelse(M[i,j] <= phi, (((1.5*M[i,j])/phi) - 0.5*((M[i,j]/phi)^3)),1)
-      }else{M_[i,j] = 0}
-    }
-  }
- return(M_) 
+trace_variog <- function(sigmasq, phi, h){
+  Gamma_h = ifelse(h <= phi, sigmasq * (1.5*(h/phi) - 0.5*((h/phi)^3) ), sigmasq) 
+  return(Gamma_h)
 }
 
-Gamma_h = f_trace_variog(7769, 2184, tracev_$Eu.d)
-Gamma_h2 = f_trace_variog(8296, 1756, tracev_$Eu.d)
+h_max = as.integer(max(tracev2$Eu.d))
+sigmasq  = fit_spherical2$best$cov.pars[1]
+phi = fit_spherical2$best$cov.pars[2]
 
-View(Gamma_h)
+Gamma_h =  sapply(1:h_max, function(h) trace_variog(sigmasq, phi, h))
 
-L2norm_ = l2.norm(s = ncol(Temp.fd$coefs), 
-                  datafd = Temp.fd, 
-                  M = M_pen)
+plot(tracev2$u, tracev2$v, xlab = 'Distance (km)', 
+     ylab = expression(gamma(h) ), main = 'Trace-variogram cloud') # gráfico del semivargiograma empirico
+lines(1:h_max, Gamma_h, col = 'red')
+legend("topleft", legend=c("empirical trace variogram","spherical"),
+       pch = c(1, NA), lty = c(NA, 1), col = c(1,2), pt.cex = 1, bty = "n")
 
-Gamma_norm = Gamma_h/max(Gamma_h) # se parece a Gamma/sigma2
-# multiplicative weighting
+## 5.6 Clustering based on the L2 norm of the difference between two curves (their feature distance) ----
+## distance based on the matrix of Euclidean distance among 
+## the coefficients of the Fourier basis functions used to smooth the temperature data 
 
-#wtv_ = sqrt(Gamma_h*sqrt(L2norm_)) # params paper
-wtv_ = sqrt(L2norm_)/sqrt(Gamma_h) # params paper
-#D_weighted <- D_weighted * (max(D_L2) / max(D_weighted))
-row.names(wtv_) = CanadianWeather$place
-WTV <- as.dist(wtv_)
-hc <- hclust(WTV, method = "complete", members = NULL)
-plot(hc, hang = -1)
+L2norm_ = l2.norm(s = ncol(Temp.fd$coefs), datafd = Temp.fd, M = M_pen)
 
-  # inverse weighting
-wtv_inv = sqrt(L2norm_)/(1+Gamma_h2) # params paper
-wtv_inv_ <- wtv_inv * (max(sqrt(L2norm_)) / max(wtv_inv))
-#wtv_inv = sqrt(L2norm_)/(1+Gamma_norm) # params paper
-row.names(wtv_inv_) = CanadianWeather$place
-WTV_inv_ = as.dist(wtv_inv_)
-hc_inv_ <- hclust(WTV_inv_, method = "complete", members = NULL)
-plot(hc_inv_, hang = -1)
-
-# additive / normalized weighting
-wtv_add = sqrt(L2norm_)*(1+(Gamma_h/max(Gamma_h))) # params paper
-#wtv_add = sqrt(L2norm_)*(1+(Gamma_norm)) # params paper
-wtv_add_ <- (wtv_add/max(wtv_add))*100
-#wtv_add_ = wtv_add * (max(sqrt(L2norm_)) / max(wtv_add))
-row.names(wtv_add_) = CanadianWeather$place
-WTV_add_ = as.dist(wtv_add_)
-hc_add_ <- hclust(WTV_add_, method = "complete", members = NULL)
-plot(hc_add_, hang = -1)
-
-# element-by-element multiplication ----
-
-wtv_2 = Gamma_h2*sqrt(L2norm_) # params fda::CanadianWeather
 sqrt_L2 = sqrt(L2norm_)
-
-row.names(wtv_2) = CanadianWeather$place
 row.names(sqrt_L2) = CanadianWeather$place
+hc_L2 = hclust(as.dist(sqrt_L2), method = "complete", members = NULL)
 
-WTV2 <- as.dist(wtv_2)
+dend_data_L2 <- dendro_data(hc_L2, type = "rectangle")
+h_cut_L2 <- hc_L2$height[nrow(sqrt_L2) - 9] + 1e01
 
-hc0 = hclust(as.dist(sqrt_L2), method = "complete", members = NULL)
-hc2 <- hclust(WTV2, method = "complete", members = NULL)
+dnd_L2 =  ggplot() +
+  geom_segment(data = dend_data_L2$segments,
+               aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_text(data = dend_data_L2$labels,
+            aes(x = x, y = y, label = label),
+            hjust = 1, angle = 90, size = 6) +
+  geom_hline(yintercept = h_cut_L2, 
+             color = "red", 
+             linewidth = 1, 
+             linetype = "dashed") +
+  coord_cartesian(ylim = c(-2e02, 6.5e02))+
+  #coord_flip() +  # Flip to match base R's orientation
+  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
+  theme_minimal() +
+  labs(title = "Smoothed",
+       y = "Euclidean distance", x = "Stations")+
+  theme(axis.title = element_text(size = 16))
 
+memb_L2 <- cutree(hc_L2, k = 9)
+coords_L2 <- mutate(coords_, clust_L2 = memb_L2,
+                    clust_L2_paper = case_when(
+                      clust_L2 == 1 ~ 5,
+                      clust_L2 == 2 ~ 6,
+                      clust_L2 == 3 ~ 8,
+                      clust_L2 == 4 ~ 7,
+                      clust_L2 == 5 ~ 4,
+                      clust_L2 == 6 ~ 9,
+                      clust_L2 == 7 ~ 3,
+                      clust_L2 == 8 ~ 2,
+                      clust_L2 == 9 ~ 1,
+                      TRUE ~ NA_real_
+                    ))
 
-plot(hc0, hang = -1)
-plot(hc2, hang = -1)
+map_L2 <- ggplot() +
+  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
+               color = "lightgray", fill = NA) +
+  geom_text(data = coords_L2, 
+            aes(x = W.longitude, y = N.latitude, label = clust_L2_paper), size = 8)+
+  theme_bw()
 
-# cluster quality measures
+grid.arrange(dnd_L2, map_L2, ncol = 2)
+
+# 5.7 weighting dissimilarity matrix by the trace-variogram ----
+
+h_dist = st_distance(Canada_weather)
+h_dist = set_units(h_dist, "km") # convierte a km   
+h_dist = matrix(as.numeric(h_dist), nr = nrow(h_dist), ncol = ncol(h_dist))
+
+Gamma_h = trace_variog(7769, 2184, h_dist)#/7769 # params paper
+
+# d_ij^w = d_ij * \gamma(h) con h = dist(x_i, x_j) donde x_i = (lat_i, lon_i) y dist: distancia euclideana
+wtv = sqrt(L2norm_)*Gamma_h 
+wtv_ = wtv/max(wtv)*99 # re-escala la longitud de height a 0-100
+row.names(wtv_) = CanadianWeather$place
+hc_wtv <- hclust(as.dist(wtv_), method = "complete", members = NULL)
+
+dend_data_wtv <- dendro_data(hc_wtv, type = "rectangle")
+h_cut_wtv <- hc_wtv$height[nrow(wtv_) - 9] #+ 1e01
+
+dnd_wtv =  ggplot() +
+  geom_segment(data = dend_data_wtv$segments,
+               aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_text(data = dend_data_wtv$labels,
+            aes(x = x, y = y, label = label),
+            hjust = 1, angle = 90, size = 6) +
+  geom_hline(yintercept = h_cut_wtv, 
+             color = "red", 
+             linewidth = 1, 
+             linetype = "dashed") +
+  coord_cartesian(ylim = c(-2e01, 1e02))+
+  theme_minimal() +
+  labs(title = "Weighted by trace-variogram",
+       y = "Weighted Euclidean distance", x = "Stations")+
+  theme(axis.title = element_text(size = 16))
+
+memb_wtv <- cutree(hc_wtv, k = 9)
+coords_wtv <- mutate(coords_, place = CanadianWeather$place,
+                     clust_wtv = memb_wtv,
+                     clust_wtv_paper = case_when(
+                       clust_wtv == 1 ~ 4,
+                       clust_wtv == 2 ~ 5,
+                       clust_wtv == 3 ~ 8,
+                       clust_wtv == 4 ~ 2,
+                       clust_wtv == 5 ~ 9,
+                       clust_wtv == 6 ~ 1,
+                       clust_wtv == 7 ~ 6,
+                       clust_wtv == 8 ~ 3,
+                       clust_wtv == 9 ~ 7,
+                       TRUE ~ NA_real_
+                   ))
+
+map_wtv <- ggplot() +
+  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
+               color = "lightgray", fill = NA) +
+  geom_text(data = coords_wtv, 
+            aes(x = W.longitude, y = N.latitude, 
+                label = clust_wtv_paper), size = 8,
+            color = ifelse(coords_wtv$place %in% c("Calgary", "Edmonton", "Inuvik", "Pr. George"), 
+                           "red", "black"))+
+  theme_bw()
+
+grid.arrange(dnd_wtv, map_wtv, ncol = 2)
+
+## params fda::CanadianWeather
+Gamma_h2 = trace_variog(sigmasq, phi, h_dist)#
+wtv2 = sqrt(L2norm_)*Gamma_h2 # params fda::CanadianWeather
+wtv_2 = wtv2/max(wtv2)*99 # re-escala la longitud de height a 0-100
+row.names(wtv_2) = CanadianWeather$place
+hc_wtv2 <- hclust(as.dist(wtv_2), method = "complete", members = NULL)
+
+dend_data_wtv2 <- dendro_data(hc_wtv2, type = "rectangle")
+h_cut_wtv2 <- hc_wtv2$height[nrow(wtv_2) - 9] + 2
+
+dnd_wtv2 =  ggplot() +
+  geom_segment(data = dend_data_wtv2$segments,
+               aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_text(data = dend_data_wtv2$labels,
+            aes(x = x, y = y, label = label),
+            hjust = 1, angle = 90, size = 6) +
+  geom_hline(yintercept = h_cut_wtv2, 
+             color = "red", 
+             linewidth = 1, 
+             linetype = "dashed") +
+  coord_cartesian(ylim = c(-2e01, 1e02))+
+  theme_minimal() +
+  labs(title = "Weighted by trace-variogram",
+       y = "Weighted Euclidean distance", x = "Stations")+
+  theme(axis.title = element_text(size = 16))
+
+memb_wtv2 <- cutree(hc_wtv2, k = 9)
+coords_wtv2  = mutate(coords_, place = CanadianWeather$place,
+                      clust_wtv2 = memb_wtv2,
+                      clust_wtv_paper = case_when(
+                        clust_wtv2 == 1 ~ 4,
+                        clust_wtv2 == 2 ~ 5,
+                        clust_wtv2 == 3 ~ 9,
+                        clust_wtv2 == 4 ~ 2,
+                        clust_wtv2 == 5 ~ 3,
+                        clust_wtv2 == 6 ~ 1,
+                        clust_wtv2 == 7 ~ 6,
+                        clust_wtv2 == 8 ~ 8,
+                        clust_wtv2 == 9 ~ 7,
+                        TRUE ~ NA_real_
+                      ))
+
+map_wtv2 <- ggplot() +
+  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
+               color = "lightgray", fill = NA) +
+  geom_text(data = coords_wtv2, 
+            aes(x = W.longitude, y = N.latitude, label = clust_wtv_paper), 
+            color = ifelse(coords_wtv2$place %in% c("Arvida", "Bagottville", "Inuvik", "Scheffervll", "Thunder Bay"),
+                           "red", "black"), size = 8)+
+  theme_bw()
+
+grid.arrange(dnd_wtv2, map_wtv2, ncol = 2)
+
+# 5.8 Cluster quality measures ----
 k_range <- 2:25
 
-# crea lista con los labels para cada corte de k grupos ----
-clusters <- lapply(k_range, function(k) cutree(hc, k = k))
-names(clusters) <- paste0("k_", k_range)
+clusters_wtv <- lapply(k_range, function(k) cutree(hc_wtv, k = k))
+names(clusters_wtv) <- paste0("k_", k_range)
 
-clusters2 <- lapply(k_range, function(k) cutree(hc2, k = k))
-names(clusters2) <- paste0("k_", k_range)
-
-sil_width <- sapply(clusters, function(cl) {
-  mean(silhouette(x = cl, dist = WTV)[, 3])
+sil_width_wtv <- sapply(clusters_wtv, function(cl) {
+  mean(silhouette(x = cl, dist = as.dist(wtv))[, 3])
 })
 
-sil_width2 <- sapply(clusters2, function(cl) {
-  mean(silhouette(x = cl, dist = WTV2)[, 3])
+clusters_wtv2 <- lapply(k_range, function(k) cutree(hc_wtv2, k = k))
+names(clusters_wtv2) <- paste0("k_", k_range)
+
+sil_width_wtv2 <- sapply(clusters_wtv2, function(cl) {
+  mean(silhouette(x = cl, dist = as.dist(wtv2))[, 3])
 })
 
 clust_qidx <- data.frame(
   n_clust = k_range,
-  Silhouette = sil_width,
-  Silhouette2 = sil_width2)
+  Silhouette = sil_width_wtv,
+  Silhouette2 = sil_width_wtv2)
+
+my_theme_sil <- function() {
+  theme(
+    strip.text = element_text(size = 24, face = "bold"),
+    axis.text = element_text(size = 24),
+    axis.title = element_text(size = 24), 
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_line(color = "lightgrey", size = 0.25)
+  )
+}
 
 sil_wtv <- ggplot(clust_qidx)+
   geom_line(aes(x = n_clust, y = Silhouette))+
   scale_x_continuous(breaks = seq(2, 25, 1)) +
   theme_minimal() + 
   labs(y = 'Average silhouette width', x = 'Number of clusters k')+ 
-  theme(strip.text = element_text(size = 24, face = "bold"),
-        axis.text = element_text(size = 24),
-        axis.title = element_text(size = 24), 
-        axis.text.x = element_text(size = 16),
-        axis.text.y = element_text(size = 16),
-        panel.grid.minor.x = element_blank(),
-        panel.grid.minor.y = element_blank(),
-        panel.grid.major.x = element_line(color = "lightgrey", size = 0.25))+ 
+  my_theme_sil()+ 
   annotate(geom = "text", x = 15, y = 0.9, 
            label = "Params paper", 
            size = 10) +
@@ -2065,169 +2182,13 @@ sil_wtv2 <- ggplot(clust_qidx)+
   scale_x_continuous(breaks = seq(2, 25, 1)) +
   theme_minimal() + 
   labs(y = 'Average silhouette width', x = 'Number of clusters k')+ 
-  theme(strip.text = element_text(size = 24, face = "bold"),
-        axis.text = element_text(size = 24),
-        axis.title = element_text(size = 24),
-        axis.text.x = element_text(size = 16),
-        axis.text.y = element_text(size = 16),
-        panel.grid.minor.x = element_blank(),
-        panel.grid.minor.y = element_blank(),
-        panel.grid.major.x = element_line(color = "lightgrey", size = 0.25))+ 
+  my_theme_sil()+ 
   annotate(geom = "text", x = 15, y = 0.9, 
            label = "Params fda::CanadianWeather", 
            size = 10) +
   annotate(geom = "text", x = 15, y = 0.85, 
-           label = as.character(expression(phi == 1756 ~ ', ' ~ sigma^2 == 8296)), 
+           label = as.character(expression(phi == 1778 ~ ', ' ~ sigma^2 == 8306)), 
            parse = TRUE,
            size = 10) 
 
-grid.arrange(sil_wtv, sil_wtv2, ncol = 2,
-             top = textGrob(
-               "",
-               gp = gpar(fontsize = 24, fontface = "bold")
-             ))
-
-# dendograma -----
-dend_data0 <- dendro_data(hc0, type = "rectangle")
-h_cut0 <- hc0$height[nrow(sqrt_L2) - 9] + 1e01
-
-dnd_L2 =  ggplot() +
-  geom_segment(data = dend_data0$segments,
-               aes(x = x, y = y, xend = xend, yend = yend)) +
-  geom_text(data = dend_data$labels,
-            aes(x = x, y = y, label = label),
-            hjust = 1, angle = 90, size = 6) +
-  geom_hline(yintercept = h_cut0, 
-             color = "red", 
-             linewidth = 1, 
-             linetype = "dashed") +
-  coord_cartesian(ylim = c(-2e02, 6.5e02))+
-  #coord_flip() +  # Flip to match base R's orientation
-  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
-  theme_minimal() +
-  labs(title = "Smoothed",
-       y = "Height", x = "Stations")+
-  theme(axis.title = element_text(size = 16))
-
-dend_data <- dendro_data(hc, type = "rectangle")
-h_cut <- hc$height[nrow(wtv_) - 9] + 2 #+ 1e04
-
-# Plot dendrogram with ggplot2
-dnd_wtv =  ggplot() +
-  geom_segment(data = dend_data$segments,
-               aes(x = x, y = y, xend = xend, yend = yend)) +
-  geom_text(data = dend_data$labels,
-            aes(x = x, y = y, label = label),
-            hjust = 1, angle = 90, size = 6) +
-  geom_hline(yintercept = h_cut, 
-             color = "red", 
-             linewidth = 1, 
-             linetype = "dashed") +
-  #coord_cartesian(ylim = c(-7e05, 4.5e06))+
-  coord_cartesian(ylim = c(-2e02, 5.5e02))+
-  #coord_flip() +  # Flip to match base R's orientation
-  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
-  theme_minimal() +
-  labs(title = "Weighted by trace-variogram",
-       y = "Height", x = "Stations")+
-  theme(axis.title = element_text(size = 16))
-
-dend_data2 <- dendro_data(hc2, type = "rectangle")
-h_cut2 <- hc2$height[nrow(wtv_2) - 9] + 2
-
-dnd_wtv2 =  ggplot() +
-  geom_segment(data = dend_data2$segments,
-               aes(x = x, y = y, xend = xend, yend = yend)) +
-  geom_text(data = dend_data$labels,
-            aes(x = x, y = y, label = label),
-            hjust = 1, angle = 90, size = 6) +
-  geom_hline(yintercept = h_cut2, 
-             color = "red", 
-             linewidth = 1, 
-             linetype = "dashed") +
-  #coord_cartesian(ylim = c(-7e05, 4.5e06))+
-  coord_cartesian(ylim = c(-2e02, 5.5e02))+
-  #coord_flip() +  # Flip to match base R's orientation
-  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
-  theme_minimal() +
-  labs(title = "Weighted by trace-variogram",
-       y = "Height", x = "Stations")+
-  theme(axis.title = element_text(size = 16))
-
-dend_data_inv <- dendro_data(hc_inv, type = "rectangle")
-h_cut_inv <- hc_inv$height[nrow(wtv_inv) - 9] + 2 #+ 1e04
-
-# Plot dendrogram with ggplot2
-dnd_wtv_inv =  ggplot() +
-  geom_segment(data = dend_data_inv$segments,
-               aes(x = x, y = y, xend = xend, yend = yend)) +
-  geom_text(data = dend_data$labels,
-            aes(x = x, y = y, label = label),
-            hjust = 1, angle = 90, size = 6) +
-  geom_hline(yintercept = h_cut_inv, 
-             color = "red", 
-             linewidth = 1, 
-             linetype = "dashed") +
-  #coord_cartesian(ylim = c(-7e05, 4.5e06))+
-  coord_cartesian(ylim = c(-1e02, 2.5e02))+
-  #coord_flip() +  # Flip to match base R's orientation
-  #scale_y_reverse(expand = c(0.2, 0)) +  # Reverse y-axis for hang = -1 effect
-  theme_minimal() +
-  labs(title = "Weighted by trace-variogram",
-       y = "Height", x = "Stations")+
-  theme(axis.title = element_text(size = 16))
-
-memb0 <- cutree(hc0, k = 9)
-memb <- cutree(hc, k = 9)
-memb2 <- cutree(hc2, k = 9)
-
-# condicional identificando clusters del paper
-memb0 = ifelse(memb0==1,5, 
-               ifelse(memb0==2, 6,
-                      ifelse(memb0==3, 8,
-                             ifelse(memb0==4, 7,
-                                    ifelse(memb0==5, 4, 
-                                           ifelse(memb0==6, 9,
-                                                  ifelse(memb0==7, 3,
-                                                         ifelse(memb0==8,2, 1))))))))
-
-coords_2  = mutate(coords_, clust_L2 = memb0, clust_wtv = memb, clust_wtv2 = memb2)
-
-map_L2 <- ggplot() +
-  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
-               color = "lightgray", fill = NA) +
-  geom_text(data = coords_2, 
-            aes(x = W.longitude, y = N.latitude, label = clust_L2), size = 8)+
-  theme_bw()
-
-map_wtv <- ggplot() +
-  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
-               color = "lightgray", fill = NA) +
-  geom_text(data = coords_2, 
-            aes(x = W.longitude, y = N.latitude, label = clust_wtv), size = 8)+
-  theme_bw()
-
-map_wtv2 <- ggplot() +
-  geom_polygon(data = canada, aes(x = long, y = lat, group = group), 
-               color = "lightgray", fill = NA) +
-  geom_text(data = coords_2, 
-            aes(x = W.longitude, y = N.latitude, label = clust_wtv2), size = 8)+
-  theme_bw()
-
-grid.arrange(dnd_L2, map_L2, ncol = 2,
-             top = textGrob(
-               "",
-               gp = gpar(fontsize = 24, fontface = "bold")
-             ))
-
-grid.arrange(dnd_wtv, map_wtv, ncol = 2,
-             top = textGrob(
-               "",
-               gp = gpar(fontsize = 24, fontface = "bold")
-             ))
-
-grid.arrange(dnd_wtv2, map_wtv2, ncol = 2,
-             top = textGrob(
-               "",
-               gp = gpar(fontsize = 24, fontface = "bold")
-             ))
+grid.arrange(sil_wtv, sil_wtv2, ncol = 2)
