@@ -23,10 +23,61 @@ library(imputeTS) # na_kalman, na_seadec
 library(units) # convertir a km
 library(future) # procesamiento en paralelo
 library(future.apply)
-
+library(gridExtra)
+library(ggrepel)
+library(xtable)
 
 setwd('~/TS_climatic/')
 list.files()
+
+my_theme_bx <- function(rotate = FALSE, legend = TRUE){
+  if(rotate ==TRUE){
+    theme(legend.position = "none",
+          #legend.position = c(0.9, 0.85),
+          axis.text = element_text(size = 24),
+          #axis.text.x = element_text(size = 24),
+          axis.text.x = element_text(size = 24, hjust = 1, angle = 90),
+          axis.title = element_text(size = 24),
+          #legend.text = element_text(size = 24),
+          #legend.title = element_text(size = 24),
+          plot.title = element_text(size=24,face="bold"))
+  }else{
+    if(legend == TRUE){
+      theme(#legend.position = "none",
+            legend.position = c(0.15, 0.8),
+            legend.background = element_blank(),
+            axis.text = element_text(size = 24),
+            axis.text.x = element_text(size = 24),
+            axis.title = element_text(size = 24),
+            legend.text = element_text(size = 24),
+            legend.title = element_text(size = 24),
+            plot.title = element_text(size=24,face="bold"))
+    }else{
+      theme(legend.position = "none",
+            #legend.position = c(0.9, 0.85),
+            axis.text = element_text(size = 24),
+            axis.text.x = element_text(size = 24),
+            axis.title = element_text(size = 24),
+            #legend.text = element_text(size = 24),
+            #legend.title = element_text(size = 24),
+            plot.title = element_text(size=24,face="bold"))
+    }
+    
+  }
+}
+
+my_theme <- function() {
+  theme(
+    #legend.position = c(0.9, 0.85),
+    legend.position = "right", # a la derecha para facilitar lectura
+    axis.text = element_text(size = 24),
+    #axis.text.x = element_text(size = 24, hjust = 1, angle = 90),
+    axis.title = element_text(size = 24),
+    legend.text = element_text(size = 24),
+    legend.title = element_text(size = 24),
+    plot.title = element_text(size=24,face="bold")
+  )
+}
 
 # 1. Carga los datos ----
 #sttns = arrow::read_parquet("sttns_pcp_col.parquet")
@@ -191,6 +242,7 @@ for(i in 1:length(pol_list)){
   names(pol2_list[[i]]) = gsub('\\.','-',names(pol2_list[[i]]))
 }
 # OBS: las sttns van hasta 2020-12, mientras que CHIRPS va hasta 2022
+# OBS: geometry-x es CHIRPS y geometry-y es sttns
 
 # 7. Pivotar de columnas a filas ----
 
@@ -565,17 +617,17 @@ bx_ = bx_text(df_pearson, serie, r)
 ggplot(df_pearson, aes(x = fct_rev(serie), y = r, fill = serie)) +
   geom_boxplot() + 
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 6) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 6) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 6) +
   # título y nombres de ejes
-  labs(title = "Boxplots del coef corr Pearson", x = "serie", y = expression(r)) +
+  labs(title = "Boxplots del coef corr Pearson", x = "Serie", y = expression(r)) +
   theme_minimal() +
   # sin leyenda y tamaño del texto de los ejes
   theme(legend.position = "none", axis.text.x = element_text(size = 14),
@@ -598,26 +650,25 @@ bx_ = bx_text(df_Spearman, serie, r_s)
 ## +obs3: El RIQ es mayor en la ts diff estacionalmente, la variabilidad de r_s aumenta (amplitud de la caja)
 ## +obs4: menos % outliers (1.9% a 2.2%) en ts diff estacionalmente que en corr_Pearson
 
-ggplot(df_Spearman, aes(x = fct_rev(serie), y = r_s, fill = serie)) +
-  geom_boxplot() +
+RS_p1<- ggplot(df_Spearman, aes(x = fct_rev(serie), y = r_s, fill = serie)) +
+  geom_boxplot(width = 0.3) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 5) +
+  annotate("text", y = 1, x = 0.6, label = "(a)", size=12)+
   # título y nombres de ejes
-  labs(title = "Boxplots del coef de Spearman", x = "serie", y = expression(r[s])) +
-  theme_minimal() +
-  # sin leyenda y tamaño del texto de los ejes
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
+  #labs(title = "Boxplots del coeficiente de \ncorrelación de Spearman", x = "serie", y = expression(r[s])) +
+  labs(title = "", x = "Serie", y = expression(r[s])) +
+  scale_x_discrete(labels = c("diff estacionalmente" = "diff\nestacionalmente"))+
+  theme_bw() +
+  my_theme_bx()
 
 ## 9.4 test de significancia coef corr spearman a ts diff estacionalmente ----
 test_d_R_Spearman = c()
@@ -661,29 +712,37 @@ df_R_Spearman_mes <- df_R_Spearman_mes %>%
                names_to = "mes", 
                values_to = "r_s")
 
+meses_abrev <- c("ene","feb","mar","abr","may","jun",
+                 "jul","ago","sep","oct","nov","dic")
 # factor ordenado especifica levels
 df_R_Spearman_mes = df_R_Spearman_mes %>% 
   mutate(mes = factor(mes, levels = meses))
 
-bx_ = bx_text(df_R_Spearman_mes, serie = mes, r = r_s)
+df_R_Spearman_mes$mes_abrev <- factor(
+  meses_abrev[match(df_R_Spearman_mes$mes, meses)],
+  levels = meses_abrev)
 
-ggplot(df_R_Spearman_mes, aes(x = mes, y = r_s)) +
+bx_ = bx_text(df_R_Spearman_mes, serie = mes_abrev, r = r_s)
+
+bx_r_s_mes = ggplot(df_R_Spearman_mes, aes(x = mes_abrev, y = r_s)) +
   geom_boxplot(fill = "lightblue", color = "black") +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  # título y nombres de ejes
-  theme_minimal() +
-  labs(title = expression("Boxplot del coef corr Spearman r"["s"] ~ "por mes"),
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4.5) +
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4.5) +
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4.5) +
+  theme_bw() +
+  annotate("text", x = 0.9, y = 1.1, label = "(a)", size=12)+
+  scale_y_continuous(limits = c(-0.25, 1.1), breaks = seq(-0.25, 1, by = 0.25))+
+  labs(#title = expression("Boxplot del r"["s"] ~ "por mes"),
        x = "Mes", 
-       y = expression(r["s"])) #+
+       y = expression(r["s"])) +
+  my_theme_bx()
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ## Boxplot R_Spearman por cat_mes (DJF, MAM, JJA, SON) ----
@@ -718,23 +777,29 @@ df_R_Spearman_cat_mes = mutate(df_R_Spearman_cat_mes,
 
 bx_ = bx_text(df_R_Spearman_cat_mes, cat_mes, r_s)
 
-ggplot(df_R_Spearman_cat_mes, aes(x = cat_mes, y = r_s)) +
-  geom_boxplot(fill = "lightblue", color = "black") +
+bx_r_s_meses = ggplot(df_R_Spearman_cat_mes, aes(x = cat_mes, y = r_s)) +
+  geom_boxplot(fill = "lightblue", color = "black", width =0.3) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 5) +
+  #coord_cartesian(ylim = c(-0.25, 1.1))+
+  annotate("text", x = 0.9, y = 1.1, label = "(b)", size=12)+
+  scale_y_continuous(limits = c(-0.25, 1.1), breaks = seq(-0.25, 1, by = 0.25))+
   # título y nombres de ejes
-  theme_minimal() +
-  labs(title = expression("Boxplot del coef corr Spearman r"["s"] ~ "por grupo de meses"),
-       x = "meses", 
-       y = expression(r["s"])) 
+  labs(#title = expression("Boxplot del r"["s"] ~ "por meses agrupados"),
+       x = "Meses", 
+       y = expression(r["s"])) +
+  theme_bw() +
+  my_theme_bx()
+
+grid.arrange(bx_r_s_mes,bx_r_s_meses, ncol = 2, widths = c(1.45, 1))
 
 ## Scatterplot r_s vs altitud ----
 
@@ -787,17 +852,49 @@ ggplot() +
   geom_sf(data = shp_depto, alpha =  0.2)
 
 ## !!! Falta agregar elementos de los mapas: Norte, escala
+range(sttns.points$d_R_Spearman, na.rm = T)
+
+sttns.points <- sttns.points %>%
+  mutate(d_R_cat = cut(
+    d_R_Spearman,
+    breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1),
+    include.lowest = TRUE,
+    right = TRUE,
+    labels = c("[0,0.2]","(0.2,0.4]","(0.4,0.6]","(0.6,0.8]","(0.8,1]")))
+
+cols_ <- c("[0,0.2]"   = "#b2182b",  "(0.2,0.4]" = "#ef8a62",
+           "(0.4,0.6]" = "#fddbc7","(0.6,0.8]" = "#a6dba0","(0.8,1]" = "#1b7837")
+
+cols_ = colorRampPalette(c("red", "green"))(5)
+
+map_rs <- ggplot() + 
+  geom_sf(data = shp_regions,fill = "white", color = "black", linewidth = 0.6) +   # <-- más grosor de línea
+  geom_sf(data = filter(sttns.points, !is.na(d_R_cat)),
+          aes(fill = d_R_cat, color = d_R_cat), size = 2) +
+  scale_fill_manual(values = cols_, name = expression(r["s"])) +
+  scale_color_manual(values = cols_, name = expression(r["s"])) +
+  scale_x_continuous(breaks = seq(-80, -65, by = 4))+
+  annotate("text", x = -78.3, y = 11.95, label = "(a)", size=12)+
+  #labs(title = expression("Mapa de la distribución del r"[s])) +
+  theme_bw()+
+  my_theme()+ 
+  guides(color = guide_legend(#title = "",
+                              #label = FALSE,
+                              #ncol = 2,
+                              override.aes = list(size = 4)
+  ))
+
 ggplot() + 
-  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = filter(sttns.points, !is.na(d_R_Spearman)), aes(fill = d_R_Spearman, color = d_R_Spearman), size = 1) +
+  geom_sf(data = shp_regions, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
+  geom_sf(data = filter(sttns.points, !is.na(d_R_Spearman)), 
+          aes(fill = d_R_Spearman, color = d_R_Spearman), size = 1) +
   scale_fill_gradient(low = "red", high = "green", name = expression(r["s"])) +# Muestra los puntos con valores de r_s
   scale_color_gradient(low = "red", high = "green", name = expression(r["s"])) +
-  #theme_minimal() +  # Tema minimalista
-  labs(title = expression("Distribución espacial de r"[s]) , fill = "d_R_Spearman") +  # Título y leyenda
-  # es mejor dejar la escala a un lado para facilitar lectura 
-  theme(legend.position = "right") 
+  #labs(title = expression("Distribución espacial de r"[s]) , fill = "d_R_Spearman") +  # Título y leyenda
+  labs(title = expression("Mapa de la distribución del r"[s]) , fill = "d_R_Spearman") +  # Título y leyenda
+  my_theme()
 
-## Violin plot con boxplot de R_s por región ----
+## Boxplot de R_s por región ----
 ##  modificar el parametro a FALSE evita el error al hacer el join espacial
 ## https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
 #sf::sf_use_s2(FALSE)
@@ -831,29 +928,32 @@ table(sttns.points$region)
 
 bx_ = bx_text(subset(sttns.points, !is.na(d_R_Spearman)), serie = region, r = d_R_Spearman)
 
-ggplot(filter(sttns.points, !is.na(d_R_Spearman))) + 
-  geom_violin(aes(x = region, y = d_R_Spearman, fill = region), trim = TRUE) +  # Usamos Región como eje X y r_s como eje Y
-  geom_boxplot(aes(x = region, y = d_R_Spearman, fill = region), width = 0.2) +
+bx_rs_RN <- ggplot(filter(sttns.points, !is.na(d_R_Spearman))) + 
+  #geom_violin(aes(x = region, y = d_R_Spearman, fill = region), trim = TRUE) +  # Usamos Región como eje X y r_s como eje Y
+  geom_boxplot(aes(x = region, y = d_R_Spearman, fill = region), width = 0.3) +
   scale_fill_manual(values = c("Amazonía" = "#91B495", "Andina" = "#D4B698", "Caribe" = "#F8E595",
                                "Orinoquía" = "#B5E794", "Pacífica" = "#A59CB3")) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(x = region, label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(x = region, label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+            #size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = region, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = region, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = region, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  labs(x = "región", y = expression(r["s"]), title = expression("Violin plot con boxplot de r"["s"] ~ "por región natural")) +  # Etiquetas de los ejes y título
+            vjust = -1 , size = 5) +
+  labs(x = "Región", y = expression(r["s"]))+
+  annotate("text", x = 0.9, y = 0.97, label = "(b)", size=12)+
+  #labs(x = "Región", y = expression(r["s"]), 
+  #     title = expression("Boxplot del r"["s"] ~ "por región natural")) +  # Etiquetas de los ejes y título
   # sin leyenda y tamaño del texto de los ejes
-  theme_minimal() + 
   coord_cartesian(ylim = c(0, max(bx_$df_outliers$upper_bound)))+
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
+  theme_bw() + 
+  my_theme_bx()+
+  theme(plot.margin = margin(t = 40, r = 10, b = 20, l = 10))
+
+grid.arrange(map_rs,bx_rs_RN, ncol=2)
   
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje X si es necesario
 
@@ -898,27 +998,25 @@ bx_ = bx_text(df_MAE_long, serie, MAE)
 ## +obs2: la ts diff estacionalmente tiene 1.2% menos de outliers 
 ## +obs3: el RIQ es mayor en la ts diff estacionalmente, la variabilidad del MAE aumenta (amplitud de la caja) 
 
-ggplot(df_MAE_long, aes(x = fct_rev(serie), y = MAE, fill = serie)) +
-  geom_boxplot() +
+MAE_p1 <- ggplot(df_MAE_long, aes(x = fct_rev(serie), y = MAE, fill = serie)) +
+  geom_boxplot(width=0.3) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)-20), 
-            size = 4, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)-20), 
+  #          size = 4, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 5) +
+  annotate("text", y = 605, x = 0.6, label = "(b)", size=12)+
   # título y nombres de ejes
-  labs(title = "Boxplots del MAE", x = "serie", y = "MAE") +
-  theme_minimal() +
+  labs(title = "", x = "Serie", y = "MAE") +
+  scale_x_discrete(labels = c("diff estacionalmente" = "diff\nestacionalmente"))+
+  theme_bw() +
+  my_theme_bx()
   #coord_cartesian(ylim = c(0, max(bx_$df_outliers$upper_bound)))+
-  # sin leyenda y tamaño del texto de los ejes
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
 
 ## Boxplot MAE por mes --------------------------------------------------------
 
@@ -946,8 +1044,8 @@ df_cat <- function(list = pol2_list, cat_, perf){
         perf_value <- mae(sim = data_mes$d_chirps.v2.0, 
                           obs = data_mes$d_sttns, na.rm = TRUE)
       }else if(perf == 'PBIAS'){
-        perf_value <- pbias(sim = data_mes$d_chirps.v2.0, 
-                            obs = data_mes$d_sttns, na.rm = TRUE, dec=2)
+        perf_value <- pbias(sim = data_mes$`chirps-v2-0`, 
+                            obs = data_mes$sttns, na.rm = TRUE, dec=2)
       }else{
         perf_value <- NSE(sim = data_mes$d_chirps.v2.0, 
                           obs = data_mes$d_sttns, na.rm = TRUE)
@@ -972,25 +1070,33 @@ df_cat <- function(list = pol2_list, cat_, perf){
 
 df_MAE_mes <- df_cat(list = pol2_list, cat_ = "mes", perf = "MAE")
 
-bx_ = bx_text(df_MAE_mes, serie = mes, r = MAE)
+df_MAE_mes$mes_abrev <- factor(
+  meses_abrev[match(df_MAE_mes$mes, meses)],
+  levels = meses_abrev)
 
-ggplot(df_MAE_mes, aes(x = mes, y = MAE)) +
+head(df_MAE_mes)
+
+bx_ = bx_text(df_MAE_mes, serie = mes_abrev, r = MAE)
+
+bx_MAE_mes <- ggplot(df_MAE_mes, aes(x = mes_abrev, y = MAE)) +
   geom_boxplot(fill = "lightblue", color = "black") +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4.5) +
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4.5) +
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4.5) +
+  theme_bw() +
+  annotate("text", y = 400, x = 1.1, label = "(a)", size=12)+
   # título y nombres de ejes
-  theme_minimal() +
-  labs(title = "Boxplot del MAE por mes",
-       x = "Mes", 
-       y = "MAE") #+
+  theme_bw() +
+  labs(#title = "Boxplot del MAE por mes",
+       x = "Mes", y = "MAE") +
+  my_theme_bx()
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ## Boxplot MAE por cat_mes (DJF, MAM, JJA, SON) ----
@@ -999,23 +1105,27 @@ df_MAE_cat_mes <- df_cat(list = pol2_list, cat_ = "cat_mes", perf = "MAE")
 
 bx_ = bx_text(df_MAE_cat_mes, cat_mes, MAE)
 
-ggplot(df_MAE_cat_mes, aes(x = cat_mes, y = MAE)) +
-  geom_boxplot(fill = "lightblue", color = "black") +
+bx_MAE_meses <- ggplot(df_MAE_cat_mes, aes(x = cat_mes, y = MAE)) +
+  geom_boxplot(fill = "lightblue", color = "black", width =0.3) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  # título y nombres de ejes
-  theme_minimal() +
-  labs(title = expression("Boxplot del MAE por grupo de meses"),
-       x = "meses", 
-       y = "MAE") 
+            vjust = -1 , size = 5) +
+  annotate("text", y = 400, x = 0.9, label = "(b)", size=12)+
+  coord_cartesian(ylim =c(0,405))+
+  #scale_y_continuous(limits = c(-0.25, 1.1), breaks = seq(-0.25, 1, by = 0.25))+
+  labs(#title = expression("Boxplot del MAE por grupo de meses"),
+       x = "Meses", y = "MAE") +
+  theme_bw() +
+  my_theme_bx()
+
+grid.arrange(bx_MAE_mes, bx_MAE_meses, ncol = 2, widths = c(1.45, 1))
 
 ## Scatterplot MAE vs altitud ----
 
@@ -1056,45 +1166,71 @@ ggplot(df_MAE_cat_mes, aes(x = MAE, y = SRTM_30)) +
 #  geom_sf(data = shp_regions, col = 'darkgreen', alpha =0.2, lwd =1) +
 #  geom_sf(data = shp_depto, alpha =  0.2)
 
-## !!! Falta agregar elementos de los mapas: Norte, escala
-ggplot() + 
-  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = filter(sttns.points, !is.na(d_MAE)), aes(fill = d_MAE, color = d_MAE), size = 1) +
-  scale_fill_gradient(low = "green", high = "red", name = "MAE") +# Muestra los puntos con valores de r_s
-  scale_color_gradient(low = "green", high = "red", name = "MAE") +
-  #theme_minimal() +  # Tema minimalista
-  labs(title = "Distribución espacial de MAE" , fill = "d_MAE") +  # Título y leyenda
-  # es mejor dejar la escala a un lado para facilitar lectura 
-  theme(legend.position = "right") 
+range(sttns.points$d_MAE, na.rm = T)
+quantile(sttns.points$d_MAE, na.rm = T)
 
-## Violin plot con boxplot de MAE por región ----
+# usando percentiles
+sttns.points <- sttns.points %>%
+  mutate(d_MAE_cat = cut(
+    d_MAE,
+    #breaks = c(0, 70, 140, 210, 280, 350),
+    breaks = c(0, 43.9, 55.1, 68.74, 85.33, 310),
+    include.lowest = TRUE,
+    right = TRUE,
+    #labels = c("[0,70]","(70,140]","(140,210]","(210,280]","(280,350]"))
+    labels = c("[0,P20]","(P20,P40]","(P40,P60]","(P60,P80]","(P80,Inf]")))
+
+#cols_ <- c("[0,P20]" = "#1b7837",  "(P20,P40]" = "#a6dba0",
+#           "(P40,P60]" = "#fddbc7","(P60,P80]" = "#ef8a62","(P80,Inf]" = "#b2182b")
+
+table(sttns.points$d_MAE_cat)
+cols_ = colorRampPalette(c("green", "red"))(5)
+
+map_MAE <- ggplot() + 
+  geom_sf(data = shp_regions,fill = "white", color = "black", linewidth = 0.6) +   # <-- más grosor de línea
+  geom_sf(data = filter(sttns.points, !is.na(d_MAE_cat)),
+          aes(fill = d_MAE_cat, color = d_MAE_cat), size = 2) +
+  scale_fill_manual(values = cols_, name = "MAE") +
+  scale_color_manual(values = cols_, name = "MAE") +
+  scale_x_continuous(breaks = seq(-80, -65, by = 4))+
+  annotate("text", x = -78.3, y = 11.95, label = "(a)", size=12)+
+  #labs(title = expression("Mapa de la distribución del r"[s])) +
+  theme_bw()+
+  my_theme()+ 
+  guides(color = guide_legend(#title = "",
+    #label = FALSE,
+    #ncol = 2,
+    override.aes = list(size = 4)
+  ))
+
+## Boxplot de MAE por región ----
 bx_ = bx_text(subset(sttns.points, !is.na(d_MAE)), serie = region, r = d_MAE)
 
-ggplot(filter(sttns.points, !is.na(d_MAE))) + 
-  geom_violin(aes(x = region, y = d_MAE, fill = region), trim = TRUE) +  # Usamos Región como eje X y r_s como eje Y
-  geom_boxplot(aes(x = region, y = d_MAE, fill = region), width = 0.2) +
+bx_MAE_RN <- ggplot(filter(sttns.points, !is.na(d_MAE))) + 
+  #geom_violin(aes(x = region, y = d_MAE, fill = region), trim = TRUE) +  # Usamos Región como eje X y r_s como eje Y
+  geom_boxplot(aes(x = region, y = d_MAE, fill = region), width = 0.3) +
   scale_fill_manual(values = c("Amazonía" = "#91B495", "Andina" = "#D4B698", "Caribe" = "#F8E595",
                                "Orinoquía" = "#B5E794", "Pacífica" = "#A59CB3")) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(x = region, label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(x = region, label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = region, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = region, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = region, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  labs(x = "región", y = "MAE", title = expression("Violin plot con boxplot de MAE por región natural")) +  # Etiquetas de los ejes y título
-  # sin leyenda y tamaño del texto de los ejes
-  theme_minimal() + 
-  coord_cartesian(ylim = c(0, max(bx_$df_outliers$upper_bound)))+
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
-
+            vjust = -1 , size = 5) +
+  labs(x = "Región", y = "MAE", title = "") +  # Etiquetas de los ejes y título
+  annotate("text", x = 0.9, y = 300, label = "(b)", size=12)+
+  theme_bw() + 
+  my_theme_bx()+
+  theme(plot.margin = margin(t = 30, r = 10, b = 30, l = 10))
+  #coord_cartesian(ylim = c(0, max(bx_$df_outliers$upper_bound)))+
+  
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje X si es necesario
+
+grid.arrange(map_MAE, bx_MAE_RN, ncol = 2)
 
 ## panel de scatterplot: MAE por región vs altitud ----
 
@@ -1122,6 +1258,11 @@ for(i in 1:len_){
                               obs = pol2_list[[i]]$d_sttns, na.rm=TRUE, dec=1)
 }
 
+pbias(sim = pol2_list[[15]]$`chirps-v2-0`,
+      obs = pol2_list[[15]]$sttns, na.rm=TRUE, dec=1)
+
+
+
 ## Boxplot comparación PBIAS ts diff estacionalmente vs ts original -------------
 # df para graficar boxpot MAE ts original vs ts transformada
 df_PBIAS_long = df_PBIAS %>% dplyr::select(-c(CodigoEstacion)) %>% 
@@ -1136,55 +1277,54 @@ bx_ = bx_text(df_PBIAS_long, serie, PBIAS)
 ## +obs2: la ts diff estacionalmente tiene 11.5% más de outliers 
 ## +obs3: el RIQ es mayor en la ts diff estacionalmente, la variabilidad del PBIAS aumenta (amplitud de la caja) 
 
-ggplot(df_PBIAS_long, aes(x = fct_rev(serie), y = PBIAS, fill = serie)) +
-  geom_boxplot() +
+PBIAS_p1 <- ggplot(df_PBIAS_long, aes(x = fct_rev(serie), y = PBIAS, fill = serie)) +
+  geom_boxplot(width=0.3) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(lower_bound)), 
-            size = 4, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(lower_bound)), 
+  #          size = 4, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2), "%")), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2), "%")), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2), "%")), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 5) +
   # título y nombres de ejes
-  labs(title = "Boxplots del PBIAS", x = "serie", y = "PBIAS") +
-  theme_minimal() +
+  labs(title = "", x = "Serie", y = "PBIAS") +
+  theme_bw() +
   scale_y_continuous(labels = percent_format(scale = 1)) +
   coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), abs(min(bx_$df_outliers$lower_bound))))+
-  # sin leyenda y tamaño del texto de los ejes
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
+  my_theme_bx() 
 
 ## Boxplot PBIAS por mes --------------------------------------------------------
 
 df_PBIAS_mes <- df_cat(list = pol2_list, cat_ = "mes", perf = "PBIAS")
 # hay valores de PBIAS NAs porque la col d_chrpsv2.0 suma cero
+df_PBIAS_mes$mes_abrev <- factor(
+  meses_abrev[match(df_PBIAS_mes$mes, meses)],
+  levels = meses_abrev)
 
-bx_ = bx_text(df_PBIAS_mes %>% filter(!is.na(PBIAS)), serie = mes, r = PBIAS)
+bx_ = bx_text(df_PBIAS_mes %>% filter(!is.na(PBIAS)), serie = mes_abrev, r = PBIAS)
 
-ggplot(df_PBIAS_mes, aes(x = mes, y = PBIAS)) +
+bx_PBIAS_mes <-ggplot(df_PBIAS_mes, aes(x = mes_abrev, y = PBIAS)) +
   geom_boxplot(fill = "lightblue", color = "black") +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(bx_$df_outliers$lower_bound)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(bx_$df_outliers$lower_bound)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q1, label = paste0("Q1: ", round(Q1, 2), "%")), 
-            vjust = 1, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q2, label = paste0("Q2: ", round(Q2, 2), "%")), 
-            vjust = -0.5, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q3, label = paste0("Q3: ", round(Q3, 2), "%")), 
-            vjust = -1 , size = 4) +
+  #geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q1, label = paste0("Q1: ", round(Q1, 2), "%")), 
+  #          vjust = 1, size = 5) +
+  #geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q2, label = paste0("Q2: ", round(Q2, 2), "%")), 
+  #          vjust = -0.5, size = 5) +
+  #geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q3, label = paste0("Q3: ", round(Q3, 2), "%")), 
+  #          vjust = -1 , size = 5) +
   scale_y_continuous(labels = percent_format(scale = 1)) +
-  coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), abs(min(bx_$df_outliers$lower_bound))))+
+  coord_cartesian(ylim = c(-103.2, abs(min(bx_$df_outliers$lower_bound))+15))+
+  annotate("text", y = 100, x = 1.1, label = "(a)", size=12)+
   # título y nombres de ejes
-  theme_minimal() +
-  labs(title = "Boxplot del PBIAS por mes",
-       x = "Mes", 
-       y = "PBIAS") #+
+  theme_bw() +
+  labs(title = "",x = "Mes", y = "PBIAS") +
+  my_theme_bx()
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ## Boxplot PBIAS por cat_mes (DJF, MAM, JJA, SON) ----
@@ -1193,25 +1333,27 @@ df_PBIAS_cat_mes <- df_cat(list = pol2_list, cat_ = "cat_mes", perf = "PBIAS")
 
 bx_ = bx_text(df_PBIAS_cat_mes, cat_mes, PBIAS)
 
-ggplot(df_PBIAS_cat_mes, aes(x = cat_mes, y = PBIAS)) +
-  geom_boxplot(fill = "lightblue", color = "black") +
+bx_PBIAS_meses <- ggplot(df_PBIAS_cat_mes, aes(x = cat_mes, y = PBIAS)) +
+  geom_boxplot(fill = "lightblue", color = "black", width =0.3) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(lower_bound)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(lower_bound)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q1, label = paste0("Q1: ", round(Q1, 2), "%")), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q2, label = paste0("Q2: ", round(Q2, 2), "%")), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q3, label = paste0("Q3: ", round(Q3, 2), "%")), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 5) +
   scale_y_continuous(labels = percent_format(scale = 1)) +
-  coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), abs(min(bx_$df_outliers$lower_bound))))+
+  annotate("text", y = 100, x = 0.9, label = "(b)", size=12)+
+  coord_cartesian(ylim = c(-103.02, 103.02))+
   # título y nombres de ejes
-  theme_minimal() +
-  labs(title = expression("Boxplot del PBIAS por grupo de meses"),
-       x = "Meses", 
-       y = "PBIAS") 
+  labs(title = "",x = "Meses", y = "PBIAS") +
+  theme_bw() +
+  my_theme_bx()
+
+grid.arrange(bx_PBIAS_mes, bx_PBIAS_meses, ncol = 2, widths = c(1.45, 1))
 
 ## Scatterplot PBIAS vs altitud ----
 
@@ -1252,49 +1394,124 @@ ggplot(df_PBIAS_cat_mes %>%  filter(abs(PBIAS)<1000), aes(x = PBIAS, y = SRTM_30
 #  geom_sf(data = shp_regions, col = 'darkgreen', alpha =0.2, lwd =1) +
 #  geom_sf(data = shp_depto, alpha =  0.2)
 
-## !!! Falta agregar elementos de los mapas: Norte, escala
-ggplot() + 
-  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = filter(sttns.points %>%  filter(abs(d_PBIAS)<300), !is.na(d_PBIAS)), aes(fill = d_PBIAS, color = d_PBIAS), size = 1) +
-  #scale_fill_gradient(low = "green", high = "red", name = "PBIAS") +# Muestra los puntos con valores de r_s
-  scale_fill_gradient2(
-    low = "red", mid = "green", high = "red", midpoint = 0, name = 'PBIAS') +
-  #scale_color_gradient(low = "green", high = "red", name = "PBIAS") +
-  scale_color_gradient2(
-    low = "red", mid = "green", high = "red", midpoint = 0, name = 'PBIAS') +
-  #theme_minimal() +  # Tema minimalista
-  labs(title = "Distribución espacial de PBIAS" , fill = "PBIAS") +  # Título y leyenda
-  # es mejor dejar la escala a un lado para facilitar lectura 
-  theme(legend.position = "right") 
+range(abssttns.points$d_PBIAS, na.rm = T) # -206249.3   12573.2
+quantile(abs(sttns.points$d_PBIAS), na.rm = T)
+quantile(sttns.points$d_PBIAS[abs(sttns.points$d_PBIAS)<100], na.rm = T)
+length(sttns.points$d_PBIAS[abs(sttns.points$d_PBIAS)<300])
 
-## Violin plot con boxplot de PBIAS por región ----
-bx_ = bx_text(subset(sttns.points, !is.na(d_PBIAS)), serie = region, r = d_PBIAS)
+quantile(abs(sttns.points$PBIAS[sttns.points$region == "Amazonía"]), na.rm = T)
+# 80% de sttns con PBIAS <10%
+length(sttns.points$PBIAS[sttns.points$region == "Amazonía" & abs(sttns.points$PBIAS) <10])/sum(sttns.points$region == "Amazonía")
 
-#ggplot(filter(sttns.points, !is.na(d_PBIAS))) +
-ggplot(filter(sttns.points, abs(d_PBIAS)<500)) + 
-  geom_violin(aes(x = region, y = d_PBIAS, fill = region), trim = TRUE) +  # Usamos Región como eje X y r_s como eje Y
-  geom_boxplot(aes(x = region, y = d_PBIAS, fill = region), width = 0.2) +
+for(i in unique(sttns.points$region)){
+  print(paste0(i, ':'))
+  print(paste0('MAE promedio: ', 
+               round(mean(sttns.points$MAE[sttns.points$region == i], na.rm = T),2)))
+  print(paste0('d_MAE promedio: ', 
+               round(mean(sttns.points$d_MAE[sttns.points$region == i], na.rm = T),2)))
+  print(paste0('precipitación quantiles:'))
+  print(quantile(apply(dplyr::select(filter(sttns.points,region == i), 
+                               starts_with('19') | starts_with('20')) %>%  
+                   as.data.frame() %>% dplyr::select(-geometry) %>%  
+                   mutate_all(as.numeric),
+                 MARGIN = 1, function(x) mean(t(x), na.rm = T))))
+}
+
+#[1] "Amazonía:"
+#[1] "MAE promedio: 76.34"
+#[1] "d_MAE promedio: 95.93"
+#[1] "precipitación quantiles:"
+#     0%      25%      50%      75%     100% 
+#   227.3245 253.8085 272.2537 306.8648 477.2843 
+
+#[1] "Andina:"
+#[1] "MAE promedio: 52.25"
+#[1] "d_MAE promedio: 60.76"
+#[1] "precipitación quantiles:"
+#     0%       25%       50%       75%      100% 
+#   42.57926 104.76916 144.39966 204.05855 575.89832 
+
+#[1] "Caribe:"
+#[1] "MAE promedio: 52.91"
+#[1] "d_MAE promedio: 67.4"
+#[1] "precipitación quantiles:"
+#     0%       25%       50%       75%      100% 
+#   20.61029 117.38251 136.95444 177.00815 403.51704 
+
+#[1] "Pacífica:"
+#[1] "MAE promedio: 173.81"
+#[1] "d_MAE promedio: 174.56"
+#[1] "precipitación quantiles:"
+#     0%       25%       50%       75%      100% 
+#   179.6343  411.1872  573.1620  669.9585 1095.9148 
+
+#[1] "Orinoquía:"
+#[1] "MAE promedio: 57.21"
+#[1] "d_MAE promedio: 73.04"
+#[1] "precipitación quantiles:"
+#     0%      25%      50%      75%     100% 
+#   147.5710 193.9903 214.3224 244.8858 412.1271
+
+sttns.points <- sttns.points %>%
+  mutate(PBIAS_cat = cut(
+    abs(PBIAS),
+    #breaks = c(0, 70, 140, 210, 280, 350),
+    breaks = c(0, 5, 10, 15, Inf),
+    include.lowest = TRUE,
+    right = TRUE,
+    #labels = c("[0,70]","(70,140]","(140,210]","(210,280]","(280,350]"))
+    labels = c("<5%","<10%","<15%",">=15%")))
+
+table(sttns.points$PBIAS_cat)
+
+cols_ = colorRampPalette(c("green", "red"))(4)
+
+map_PBIAS <- ggplot() + 
+  geom_sf(data = shp_regions,fill = "white", color = "black", linewidth = 0.6) +   # <-- más grosor de línea
+  geom_sf(data = filter(sttns.points, !is.na(PBIAS_cat)),
+          aes(fill = PBIAS_cat, color = PBIAS_cat), size = 2) +
+  scale_fill_manual(values = cols_, name = expression(abs(PBIAS))) +
+  scale_color_manual(values = cols_, name = expression(abs(PBIAS))) +
+  scale_x_continuous(breaks = seq(-80, -65, by = 4))+
+  annotate("text", x = -78.3, y = 11.95, label = "(a)", size=12)+
+  #labs(title = expression("Mapa de la distribución del r"[s])) +
+  theme_bw()+
+  my_theme()+ 
+  guides(color = guide_legend(#title = "",
+    #label = FALSE,
+    #ncol = 2,
+    override.aes = list(size = 4)
+  ))
+
+## Boxplot de PBIAS por región ----
+bx_ = bx_text(subset(sttns.points, !is.na(PBIAS)), serie = region, r = PBIAS)
+
+bx_PBIAS <- ggplot(filter(sttns.points, !is.na(PBIAS))) +
+#ggplot(filter(sttns.points, abs(d_PBIAS)<500)) + 
+  #geom_violin(aes(x = region, y = d_PBIAS, fill = region), trim = TRUE) +  # Usamos Región como eje X y r_s como eje Y
+  geom_boxplot(aes(x = region, y = PBIAS, fill = region), width = 0.3) +
   scale_fill_manual(values = c("Amazonía" = "#91B495", "Andina" = "#D4B698", "Caribe" = "#F8E595",
                                "Orinoquía" = "#B5E794", "Pacífica" = "#A59CB3")) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(x = region, label = paste0(outlier_pct, "% \n outliers"), y = min(bx_$df_outliers$lower_bound)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(x = region, label = paste0(outlier_pct, "% \n outliers"), y = min(bx_$df_outliers$lower_bound)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
-  geom_text(data = bx_$df_stats, aes(x = region, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = region, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = region, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  labs(x = "Región", y = "PBIAS", title = expression("Violin plot con boxplot de PBIAS por región natural")) +  # Etiquetas de los ejes y título
+  geom_text(data = bx_$df_stats, aes(x = region, y = Q1, label = paste0("Q1: ", round(Q1, 2), "%")), 
+            vjust = 1, size = 5) +
+  geom_text(data = bx_$df_stats, aes(x = region, y = Q2, label = paste0("Q2: ", round(Q2, 2), "%")), 
+            vjust = -0.5, size = 5) +
+  geom_text(data = bx_$df_stats, aes(x = region, y = Q3, label = paste0("Q3: ", round(Q3, 2), "%")), 
+            vjust = -1 , size = 5) +
+  labs(x = "Región", y = "PBIAS", title = "") +  # Etiquetas de los ejes y título
+  scale_y_continuous(labels = percent_format(scale = 1)) +
+  annotate("text", y = 115, x = 0.9, label = "(b)", size=12)+
   # sin leyenda y tamaño del texto de los ejes
-  theme_minimal() + 
-  coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), max(bx_$df_outliers$upper_bound)))+
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
-
+  theme_bw() + 
+  my_theme_bx()+
+  theme(plot.margin = margin(t = 10, r = 10, b = 20, l = 10))
+  #coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), max(bx_$df_outliers$upper_bound)))+
+  
+grid.arrange(map_PBIAS, bx_PBIAS, ncol=2)
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje X si es necesario
 
 ## panel de scatterplot: PBIAS por región vs altitud ----
@@ -1338,54 +1555,58 @@ bx_ = bx_text(df_NSE_long, serie, NSE)
 ## +obs2: la ts diff estacionalmente tiene 3.4% menos outliers que la ts original
 ## +obs3: el RIQ es mayor en la ts original, la variabilidad del NSE aumenta (amplitud de la caja) 
 
-ggplot(df_NSE_long, aes(x = fct_rev(serie), y = NSE, fill = serie)) +
-  geom_boxplot() +
+NSE_p1 <- ggplot(df_NSE_long, aes(x = fct_rev(serie), y = NSE, fill = serie)) +
+  geom_boxplot(width=0.3) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 4, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 4, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 5) +
+  annotate("text", y = 1, x = 0.6, label = "(c)", size=12)+
   # título y nombres de ejes
-  labs(title = "Boxplots del NSE", x = "serie", y = "NSE") +
-  theme_minimal() +
+  labs(title = "", x = "serie", y = "NSE") +
+  scale_x_discrete(labels = c("diff estacionalmente" = "diff\nestacionalmente"))+
+  theme_bw() +
+  my_theme_bx()
   #scale_y_continuous(labels = percent_format(scale = 1)) +
   #coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), abs(min(bx_$df_outliers$lower_bound))))+
-  # sin leyenda y tamaño del texto de los ejes
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
+
+grid.arrange(RS_p1, MAE_p1, NSE_p1, ncol = 3)
 
 ## Boxplot NSE por mes --------------------------------------------------------
 
 df_NSE_mes <- df_cat(list = pol2_list, cat_ = "mes", perf = "NSE")
 # hay valores de PBIAS NAs porque la col d_chrpsv2.0 suma cero
+df_NSE_mes$mes_abrev <- factor(
+  meses_abrev[match(df_NSE_mes$mes, meses)],
+  levels = meses_abrev)
 
-bx_ = bx_text(df_NSE_mes, serie = mes, r = NSE)
+bx_ = bx_text(df_NSE_mes, serie = mes_abrev, r = NSE)
 
-ggplot(df_NSE_mes, aes(x = mes, y = NSE)) +
+bx_NSE_mes <- ggplot(df_NSE_mes, aes(x = mes_abrev, y = NSE)) +
   geom_boxplot(fill = "lightblue", color = "black") +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = -max(upper_bound)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = -max(upper_bound)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
-  geom_text(data = bx_$df_stats, aes(x = mes, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  coord_cartesian(ylim = c(-max(bx_$df_outliers$upper_bound), max(bx_$df_outliers$upper_bound)))+
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 4.5) +
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 4.5) +
+  geom_text(data = bx_$df_stats, aes(x = mes_abrev, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 4.5) +
+  coord_cartesian(ylim = c(-max(bx_$df_outliers$upper_bound)-1, 
+                           max(bx_$df_outliers$upper_bound)))+
+  annotate("text", y = 1, x = 1.1, label = "(a)", size=12)+
   # título y nombres de ejes
-  theme_minimal() +
-  labs(title = "Boxplot del NSE por mes",
-       x = "Mes", 
-       y = "NSE") #+
+  theme_bw() +
+  labs(title = "", x = "Mes", y = "NSE") +
+  my_theme_bx()
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ## Boxplot NSE por cat_mes (DJF, MAM, JJA, SON) ----
@@ -1394,23 +1615,25 @@ df_NSE_cat_mes <- df_cat(list = pol2_list, cat_ = "cat_mes", perf = "NSE")
 
 bx_ = bx_text(df_NSE_cat_mes, cat_mes, NSE)
 
-ggplot(df_NSE_cat_mes, aes(x = cat_mes, y = NSE)) +
-  geom_boxplot(fill = "lightblue", color = "black") +
+bx_NSE_meses <- ggplot(df_NSE_cat_mes, aes(x = cat_mes, y = NSE)) +
+  geom_boxplot(fill = "lightblue", color = "black", width =0.3) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = cat_mes, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  # título y nombres de ejes
-  theme_minimal() +
-  labs(title = expression("Boxplot del NSE por grupo de meses"),
-       x = "Meses", 
-       y = "NSE") 
+            vjust = -1 , size = 5) +
+  coord_cartesian(ylim =c( -2.157213,  1.157213))+
+  annotate("text", y = 1, x = 0.9, label = "(b)", size=12)+
+  labs(title = "",x = "Meses", y = "NSE") +
+  theme_bw() +
+  my_theme_bx()
+
+grid.arrange(bx_NSE_mes, bx_NSE_meses, ncol = 2, widths = c(1.45, 1))
 
 ## Scatterplot NSE vs altitud ----
 
@@ -1449,44 +1672,70 @@ ggplot(df_NSE_cat_mes, aes(x = NSE, y = SRTM_30)) +
 #  geom_sf(data = shp_regions, col = 'darkgreen', alpha =0.2, lwd =1) +
 #  geom_sf(data = shp_depto, alpha =  0.2)
 
-## !!! Falta agregar elementos de los mapas: Norte, escala
-ggplot() + 
-  geom_sf(data = shp_depto, fill = "white", color = "gray") +  # Muestra el mapa de los departamentos
-  geom_sf(data = filter(sttns.points , !is.na(d_NSE)), aes(fill = d_NSE, color = d_NSE), size = 1) +
-  scale_fill_gradient(low = "red", high = "green", name = "NSE") +# Muestra los puntos con valores de r_s
-  scale_color_gradient(low = "red", high = "green", name = "NSE") +
-  #theme_minimal() +  # Tema minimalista
-  labs(title = "Distribución espacial de NSE" , fill = "NSE") +  # Título y leyenda
-  # es mejor dejar la escala a un lado para facilitar lectura 
-  theme(legend.position = "right") 
+sttns.points <- sttns.points %>%
+  mutate(d_NSE_cat = cut(
+    d_NSE,
+    #breaks = c(0, 70, 140, 210, 280, 350),
+    #breaks = c(0, 0.5, 0.7, 0.8, 1),
+    breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1),
+    include.lowest = TRUE,
+    right = TRUE,
+    #labels = c("[0,70]","(70,140]","(140,210]","(210,280]","(280,350]"))
+    #labels = c("NSE ≤ 0.50", "0.50 < NSE ≤ 0.70","0.70 < NSE ≤ 0.80",
+    #           "0.80 < NSE ≤ 1.00"))
+    labels = c("(-Inf,0.2]", "(0.2,0.4]","(0.4,0.6]","(0.6,0.8]", "(0.8,1]")))
 
-## Violin plot con boxplot de NSE por región ----
+#cols_ <- c("[0,P20]" = "#1b7837",  "(P20,P40]" = "#a6dba0",
+#           "(P40,P60]" = "#fddbc7","(P60,P80]" = "#ef8a62","(P80,Inf]" = "#b2182b")
+
+table(sttns.points$d_NSE_cat)
+cols_ = colorRampPalette(c("red", "green"))(5)
+
+map_NSE <- ggplot() + 
+  geom_sf(data = shp_regions,fill = "white", color = "black", linewidth = 0.6) +   # <-- más grosor de línea
+  geom_sf(data = filter(sttns.points, !is.na(d_NSE_cat)),
+          aes(fill = d_NSE_cat, color = d_NSE_cat), size = 2) +
+  scale_fill_manual(values = cols_, name = "NSE") +
+  scale_color_manual(values = cols_, name = "NSE") +
+  scale_x_continuous(breaks = seq(-80, -65, by = 4))+
+  annotate("text", x = -78.3, y = 11.95, label = "(a)", size=12)+
+  #labs(title = expression("Mapa de la distribución del r"[s])) +
+  theme_bw()+
+  my_theme()+ 
+  guides(color = guide_legend(#title = "",
+    #label = FALSE,
+    #ncol = 2,
+    override.aes = list(size = 4)
+  ))
+
+## Boxplot de NSE por región ----
 bx_ = bx_text(subset(sttns.points, !is.na(d_NSE)), serie = region, r = d_NSE)
 
-ggplot(filter(sttns.points, !is.na(d_NSE))) +
-  geom_violin(aes(x = region, y = d_NSE, fill = region), trim = TRUE) +  # Usamos Región como eje X y r_s como eje Y
-  geom_boxplot(aes(x = region, y = d_NSE, fill = region), width = 0.2) +
+bx_NSE <- ggplot(filter(sttns.points, !is.na(d_NSE))) +
+  #geom_violin(aes(x = region, y = d_NSE, fill = region), trim = TRUE) +  # Usamos Región como eje X y r_s como eje Y
+  geom_boxplot(aes(x = region, y = d_NSE, fill = region), width = 0.3) +
   scale_fill_manual(values = c("Amazonía" = "#91B495", "Andina" = "#D4B698", "Caribe" = "#F8E595",
                                "Orinoquía" = "#B5E794", "Pacífica" = "#A59CB3")) +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(x = region, label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(x = region, label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = region, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = region, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = region, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  labs(x = "Región", y = "NSE", title = expression("Violin plot con boxplot de NSE por región natural")) +  # Etiquetas de los ejes y título
+            vjust = -1 , size = 5) +
+  labs(x = "Región", y = "NSE", title = "") +  # Etiquetas de los ejes y título
+  annotate("text", x = 0.9, y = 0.8, label = "(b)", size=12)+
   # sin leyenda y tamaño del texto de los ejes
-  theme_minimal() + 
+  theme_bw() + 
+  my_theme_bx()+
+  theme(plot.margin = margin(t = 20, r = 10, b = 20, l = 10))
   #coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), max(bx_$df_outliers$upper_bound)))+
-  theme(legend.position = "none", axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
+  
 
+grid.arrange(map_NSE, bx_NSE, ncol = 2)  
 #theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotar las etiquetas del eje X si es necesario
 
 ## panel de scatterplot: NSE por región vs altitud ----
@@ -1840,34 +2089,32 @@ for(i in 1:len_){
 ## Boxplot R_Spearman de métodos BC en ts original vs diff estacionalmente ------
 df_Spearman = df_corr %>% dplyr::select(-c(CodigoEstacion, R_pearson, d_R_pearson)) %>% 
   pivot_longer(cols = everything(), names_to = "serie", values_to = "r_s") %>% 
-  mutate(serie = factor(gsub('pearman','',serie)))
+  mutate(serie = factor(gsub('pearman','',serie))) %>% 
+  filter(serie %in% c('d_R_S', 'd_qm_QUANT_R_S', 'd_qm_RQUANT_R_S'))%>%
+  mutate(serie = factor(serie, labels = c("diff estacionalmente", "BC QUANT", "BC RQUANT")))
 
 quantile(df_corr$d_R_Spearman)
 quantile(df_corr$d_qm_QUANT_R_Spearman)
 
 bx_ = bx_text(df_Spearman, serie, r_s)
 
-ggplot(df_Spearman, aes(x = fct_rev(serie), y = r_s, fill = serie)) +
+ggplot(df_Spearman, aes(x = serie, y = r_s, fill = serie)) +
   geom_boxplot() +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 5) +
   # título y nombres de ejes
-  labs(title = "Boxplots del coef de Spearman", x = "serie", y = expression(r[s])) +
-  theme_minimal() +
-  # sin leyenda y tamaño del texto de los ejes
-  theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
-
+  labs(title = "", x = "Serie", y = expression(r[s])) +
+  theme_bw() +
+  my_theme_bx()
+  
 # 10.4 df_MAE: agrega cols qm_{}_MAE y d_qm_{}_MAE ----------------
 for(i in 1:len_){
   # QUANT MAE -----------------------------------------------------------------
@@ -1924,9 +2171,37 @@ for(i in 1:len_){
 }
 
 ## Boxplot MAE de métodos BC en ts original vs diff estacionalmente -----------
+qm_MAE = c('d_MAE', 'd_qm_QUANT_MAE', 'd_qm_RQUANT_MAE', 'd_qm_PTF_power_MAE', 
+           'd_qm_PTF_linear_MAE', 'd_qm_PTF_scale_MAE', 'd_qm_PTF_power.x0_MAE')
+
+qm_labels = c("diff estacionalmente", "QUANT", "RQUANT", "PTF power", 
+              "PTF linear", "PTF scale", "PTF power.x0")
+
 df_MAE_long = df_MAE %>% dplyr::select(-c(CodigoEstacion)) %>% 
   pivot_longer(cols = everything(), names_to = "serie", values_to = "MAE") %>% 
-  mutate(serie = factor(serie))
+  #mutate(serie = factor(serie)) %>% 
+  filter(serie %in% qm_MAE)%>%
+  mutate(serie = factor(serie, levels = qm_MAE, labels = qm_labels))
+
+bx_ = bx_text(df_MAE_long, serie, MAE)
+
+bx_MAE_bc <- ggplot(df_MAE_long, aes(x = serie, y = MAE, fill = serie)) +
+  geom_boxplot(width = 0.3) +
+  # texto de % outliers
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
+  # texto quartiles y valores
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 5) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 5) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 5) +
+  annotate("text", y = 400, x = 0.9, label = "(a)", size=12)+
+  # título y nombres de ejes
+  labs(title = "", x = "Serie", y = 'MAE') +
+  theme_bw() +
+  my_theme_bx(rotate =TRUE)
 
 df_MAE = df_MAE %>% mutate(
   across(
@@ -1986,11 +2261,11 @@ bx_pct_cambio = inner_join(dplyr::select(bx_$df_outliers, c(serie, max_r, upper_
 ggplot(df_MAE_long, aes(x = fct_rev(serie), y = MAE, fill = serie)) +
   geom_boxplot() +
   # texto % cambio en c/método QM
-  geom_text(data = bx_pct_cambio, aes(label = paste0(pct_, "% \n cambio"), y = max(max_r)), 
+  geom_text(data = bx_pct_cambio, aes(label = paste0(pct_, "% \n cambio"), y = 600), 
             size = 4, color = "black", fontface = "bold") +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)-20), 
-            size = 4, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)-20), 
+  #          size = 4, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
             vjust = 1, size = 4) +
@@ -2001,6 +2276,7 @@ ggplot(df_MAE_long, aes(x = fct_rev(serie), y = MAE, fill = serie)) +
   # título y nombres de ejes
   labs(title = "Boxplots del MAE", x = "serie", y = "MAE") +
   theme_minimal() +
+  my_theme_bx()
   #coord_cartesian(ylim = c(0, max(bx_$df_outliers$upper_bound)))+
   # sin leyenda y tamaño del texto de los ejes
   theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1, size = 14),
@@ -2065,11 +2341,41 @@ for(i in 1:len_){
 
 ## Boxplot PBIAS de métodos BC en ts original vs diff estacionalmente ---------
 
+#qm_PBIAS = c('d_PBIAS', 'd_qm_QUANT_PBIAS', 'd_qm_RQUANT_PBIAS', 
+#               'd_qm_PTF_power_PBIAS', 'd_qm_PTF_linear_PBIAS', 
+#               'd_qm_PTF_scale_PBIAS', 'd_qm_PTF_power.x0_PBIAS')
+  
+qm_PBIAS = c('PBIAS', 'qm_QUANT_PBIAS', 'qm_RQUANT_PBIAS', 
+             'qm_PTF_power_PBIAS', 'qm_PTF_linear_PBIAS', 
+             'qm_PTF_scale_PBIAS', 'qm_PTF_power.x0_PBIAS')
+
 df_PBIAS_long = df_PBIAS %>% dplyr::select(-c(CodigoEstacion)) %>% 
   pivot_longer(cols = everything(), names_to = "serie", values_to = "PBIAS") %>% 
-  mutate(serie = factor(serie))
+  mutate(serie = factor(serie)) %>% 
+  filter(serie %in% qm_PBIAS)%>%
+  mutate(serie = factor(serie, labels = qm_labels))
 
 bx_ = bx_text(df_PBIAS_long, serie, PBIAS)
+
+bx_PBIAS_bc <- ggplot(df_PBIAS_long, aes(x = serie, y = PBIAS, fill = serie)) +
+  geom_boxplot() +
+  # texto de % outliers
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
+  # texto quartiles y valores
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2), '%')), 
+            vjust = 1, size = 5) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2), '%')), 
+            vjust = -0.5, size = 5) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2), '%')), 
+            vjust = -1 , size = 5) +
+  #coord_cartesian(ylim = c(-300,300))+
+  scale_y_continuous(labels = percent_format(scale = 1))+
+  # título y nombres de ejes
+  labs(title = "", x = "Serie", y = 'PBIAS') +
+  theme_bw() +
+  my_theme_bx()
+
 nam_ = names(df_PBIAS)[str_detect(names(df_PBIAS), '^qm|^d_qm')]
 bx_pct_cambio = data.frame(serie = nam_,  pct_ = numeric(length(nam_)))
 
@@ -2166,11 +2472,37 @@ for(i in 1:len_){
 }
 
 ## Boxplot NSE de métodos BC en ts original vs diff estacionalmente -----------
+qm_NSE = c('d_NSE', 'd_qm_QUANT_NSE', 'd_qm_RQUANT_NSE', 
+           'd_qm_PTF_power_NSE', 'd_qm_PTF_linear_NSE', 
+           'd_qm_PTF_scale_NSE', 'd_qm_PTF_power.x0_NSE')
+
 df_NSE_long = df_NSE %>% dplyr::select(-c(CodigoEstacion)) %>% 
   pivot_longer(cols = everything(), names_to = "serie", values_to = "NSE") %>% 
-  mutate(serie = factor(serie))
+  #mutate(serie = factor(serie)) %>% 
+  filter(serie %in% qm_NSE)%>%
+  mutate(serie = factor(serie, levels = qm_NSE, labels = qm_labels))
 
 bx_ = bx_text(df_NSE_long, serie, NSE)
+
+bx_NSE_bc <- ggplot(df_NSE_long, aes(x = serie, y = NSE, fill = serie)) +
+  geom_boxplot(width = 0.3) +
+  # texto de % outliers
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
+  # texto quartiles y valores
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
+            vjust = 1, size = 5) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
+            vjust = -0.5, size = 5) +
+  geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
+            vjust = -1 , size = 5) +
+  coord_cartesian(ylim = c(-1.5,1))+
+  annotate("text", y = 1, x = 0.9, label = "(b)", size=12)+
+  # título y nombres de ejes
+  labs(title = "", x = "Serie", y = 'NSE') +
+  theme_bw() +
+  my_theme_bx(rotate = TRUE)
+
 nam_ = names(df_NSE)[str_detect(names(df_NSE), '^qm|^d_qm')]
 bx_pct_cambio = data.frame(serie = nam_,  pct_ = numeric(length(nam_)))
 
@@ -2206,11 +2538,8 @@ ggplot(df_NSE_long, aes(x = fct_rev(serie), y = NSE, fill = serie)) +
   theme_minimal() +
   #coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), 1))+
   # sin leyenda y tamaño del texto de los ejes
-  theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
 
+grid.arrange(bx_MAE_bc, bx_NSE_bc, ncol = 2)
 #quantile(NSE_)
 #mean(NSE_) # 0.33
 # indica que, Chirps tiene una buena predicción, mejor que usar 
@@ -2259,16 +2588,20 @@ df_error_wide = df_error %>%
 
 # df_optim: data frame con malla de pesos para las medidas de desempeño -------
 df_optim <- expand.grid(
-  a1 = seq(0, 1, by = 0.01),
-  a2 = seq(0, 1, by = 0.01)) %>%
-  mutate(a3 = 1 - a1 - a2) %>%
+  a1 = seq(0, 1, by = 0.01)
+  #,a2 = seq(0, 1, by = 0.01)
+  ) %>%
+  mutate(
+    #a3 = 1 - a1 - a2
+    a3 = 1 - a1) %>%
   filter(a3 >= 0 & a3 <= 1)
 
 for(i in 1:nrow(df_optim)){
   
   rank_error = df_error_wide %>% 
     # crea la col pct_cambio_ como combinación lineal de sum_{j = 1}^{3} w_j (medida_desempeño)
-    mutate(pct_cambio_ = (df_optim$a1[i]*MAE) + (df_optim$a2[i]*PBIAS) - (df_optim$a3[i]*NSE) ) %>% 
+    #mutate(pct_cambio_ = (df_optim$a1[i]*MAE) + (df_optim$a2[i]*PBIAS) - (df_optim$a3[i]*NSE) ) %>%
+    mutate(pct_cambio_ = (df_optim$a1[i]*MAE) - (df_optim$a3[i]*NSE) ) %>% 
     # agrupa por ID
     group_by(CodigoEstacion) %>% 
     # filtra las filas con el min pct_cambio_
@@ -2281,15 +2614,15 @@ for(i in 1:nrow(df_optim)){
     rowwise() %>%
     # crea cols d_ensemble_{medida_desempeño} a partir del valor de la col {{serie}}_{medida_desempeño}
     mutate(d_ensemble_MAE = get(paste0(serie, "_MAE")),
-           d_ensemble_PBIAS = get(paste0(serie, "_PBIAS")),
+           #d_ensemble_PBIAS = get(paste0(serie, "_PBIAS")),
            d_ensemble_NSE = get(paste0(serie, "_NSE"))) %>%
     ungroup()
   
   # crea las cols pct_cambio_{medida_desmepño} de toda la col
   df_optim$pct_cambio_MAE[i] = f_pct_cambio(df_error_ensemble, 
                                             d_MAE, d_ensemble_MAE , perf = "MAE")
-  df_optim$pct_cambio_PBIAS[i] = f_pct_cambio(df_error_ensemble, d_PBIAS, 
-                                              d_ensemble_PBIAS, perf = "PBIAS")
+  #df_optim$pct_cambio_PBIAS[i] = f_pct_cambio(df_error_ensemble, d_PBIAS, 
+  #                                            d_ensemble_PBIAS, perf = "PBIAS")
   df_optim$pct_cambio_NSE[i] = f_pct_cambio(df_error_ensemble, d_NSE, 
                                             d_ensemble_NSE, perf = "NSE")
 }
@@ -2302,14 +2635,16 @@ for(i in 1:nrow(df_optim)){
 ## luego para el NSE en la comb. lineal se usa el negativo
 ## entonces se busca el min de pct_cambio, indica que mejora el desempeño (menor error y pbias, mayor NSE) 
 
-df_optim = df_optim %>% mutate(
-  pct_cambio = pct_cambio_MAE + pct_cambio_PBIAS - pct_cambio_NSE)
+df_optim2 = df_optim %>% mutate(
+  #pct_cambio = pct_cambio_MAE + pct_cambio_PBIAS - pct_cambio_NSE
+  pct_cambio = pct_cambio_MAE  - pct_cambio_NSE)
 
 ## el max pct_cambio_PBIAS coincide con el min pct_cambio_MAE  
 ## se gana 0.007 en MAE y 0.015 en NSE mientras que en PBIAS se pierde 0.002
-w_optim = slice_min(df_optim, pct_cambio, n = 50, with_ties = FALSE) %>%
+
+w_optim = slice_min(df_optim2, pct_cambio, n = 1, with_ties = FALSE) %>%
   filter(min(pct_cambio_MAE) == pct_cambio_MAE &  
-           max(pct_cambio_PBIAS) == pct_cambio_PBIAS &
+           #max(pct_cambio_PBIAS) == pct_cambio_PBIAS &
            max(pct_cambio_NSE) == pct_cambio_NSE)
 
 # pasa de relación 22% (pct_cambio MAE +NSE)/(pct_cambio PBIAS) a relación 13% (pct_cambio MAE +NSE)/(pct_cambio PBIAS)
@@ -2354,7 +2689,8 @@ w_min_pct_cambio = inner_join(df_min_pct_cambio_MAE,
 # df_error_ensemble: data frame para seleccionar cols ------------------------
 rank_error = df_error_wide %>% 
   # w_optim a1: 0.8, a2: 0.19 y a3: 0.01
-  mutate(pct_cambio_ = (w_optim$a1*MAE) + (w_optim$a2*PBIAS) - (w_optim$a3*NSE) ) %>%
+  #mutate(pct_cambio_ = (w_optim$a1*MAE) + (w_optim$a2*PBIAS) - (w_optim$a3*NSE) ) %>%
+  mutate(pct_cambio_ = (w_optim$a1*MAE) - (w_optim$a3*NSE) ) %>%
   # w_min_pct_cambio a1: 0.93, a2: 0.06 y a3: 0.01
   #mutate(pct_cambio_ = (w_min_pct_cambio$a1*MAE) + (w_min_pct_cambio$a2*PBIAS) - (w_min_pct_cambio$a3*NSE)) %>%
   group_by(CodigoEstacion) %>% 
@@ -2365,65 +2701,101 @@ df_error_ensemble = left_join(df_error, dplyr::select(rank_error, c('CodigoEstac
                               by = 'CodigoEstacion') %>% 
   rowwise() %>%
   mutate(d_ensemble_MAE = get(paste0(serie, "_MAE")),
-         d_ensemble_PBIAS = get(paste0(serie, "_PBIAS")),
+         #d_ensemble_PBIAS = get(paste0(serie, "_PBIAS")),
          d_ensemble_NSE = get(paste0(serie, "_NSE"))) %>%
   ungroup()
 
 ## gráfico pie del ensamble métodos QM ----------------------------------------
+unique(df_error_ensemble$serie)
+
+qm_pie = c("d_qm_QUANT", "d_qm_RQUANT","d_qm_PTF_power", "d_qm_PTF_linear", 
+           "d_qm_PTF_scale","d_qm_PTF_power.x0")
+
+df_error_ensemble$serie = factor(df_error_ensemble$serie, levels = qm_pie,labels = qm_labels[-1])
+
+tbl_qm = df_error_ensemble %>% 
+  count(serie) %>%
+  mutate(pct = n / sum(n) * 100)
+
+xtable(
+  tbl_qm,
+  caption = "",
+  label = "tab:km4",
+  align = c("l", "c", "c", "c") # column alignment: left, right, center
+)
+
 df_error_ensemble %>% 
   count(serie) %>%
   mutate(pct = n / sum(n) * 100,
-         label = ifelse(pct>1, paste0(round(pct, 1), "%"), "")) %>%
-  ggplot(aes(x = "", y = n, fill = serie)) +
+         #label = ifelse(pct>1, paste0(round(pct, 1), "%"), ""),
+         label = paste0(round(pct, 1), "%"),
+         ymax = cumsum(n),
+         ymin = lag(ymax, default = 0),
+         ymid = (ymax + ymin) / 2,
+         angle = 2 * pi * ymid,
+         hjust = ifelse(angle > pi, 1, 0)) %>%
+  ggplot(aes(x = 1, y = n, fill = serie)) +
   geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
-  geom_text(aes(label = label),
-            position = position_stack(vjust =0.5),
-            size = 9, color = "white") +
-  labs(title = "Porcentaje de métodos QM en ensemble",
-       fill = "Serie") +
-  scale_fill_viridis_d(option = "turbo") + 
+  geom_segment(aes(x = 1,xend = 1,y = ymid,yend = ymid),color = "grey50") +
+  # Repelled labels outside
+  geom_text_repel(aes(x = 0.9, y = ymid, label = label),size = 9,nudge_x = 0.3,
+                  direction = "y",segment.color = NA,box.padding = 0.3) +
+  #geom_segment(aes(x = 1,xend = 1.15,y = ymid,yend = ymid),color = "gray40") +
+  # Labels outside
+  #geom_text(aes(x = 1.25, y = ymid, label = label),size = 9,hjust = 0,color = "black") +
+  #geom_text(aes(label = label),
+  #          position = position_stack(vjust =0.5),
+  #          size = 9, color = "black") +
+  labs(title = "",
+       fill = "Método") +
+  xlim(0.5, 1.6) +
+  scale_fill_manual(values = c("#C49A00", "#53B400", "#00C094", "#00B6EB", "#A58AFF", "#FB61D7"))+ 
   theme_void() +
   theme(plot.title = element_text(hjust = 0.5))
 
 ## Boxplot MAE de ensamble métodos BC en ts original vs diff estacionalmente ----
 df_MAE_long = df_error_ensemble %>% dplyr::select(MAE, d_MAE, d_ensemble_MAE) %>% 
   pivot_longer(cols = everything(), names_to = "serie", values_to = "MAE") %>% 
-  mutate(serie = factor(serie))
+  filter(serie != 'MAE') %>% 
+  mutate(serie = factor(serie, levels =c('d_MAE','d_ensemble_MAE'), 
+                        labels =c('diff estacionalmente','QM optim')))
 
 bx_ = bx_text(df_MAE_long, serie, MAE)
 bx_pct_cambio = data.frame(serie = "d_ensemble_MAE",  pct_ = numeric(length("d_ensemble")))
 bx_pct_cambio$pct_ = f_pct_cambio(df_error_ensemble, d_MAE, !!sym("d_ensemble_MAE"), perf = "MAE")
 
+# cambio de -0.86% menor al 1%
+#serie         pct_
+#d_ensemble_MAE -0.008654621
+
 bx_pct_cambio = inner_join(dplyr::select(bx_$df_outliers, c(serie, max_r, upper_bound)),
                            bx_pct_cambio, by = 'serie') %>% 
   mutate(pct_ = round(pct_*100,2))
 
-
-ggplot(df_MAE_long, aes(x = fct_rev(serie), y = MAE, fill = serie)) +
-  geom_boxplot() +
+bx_QM_MAE_optim <- ggplot(df_MAE_long, aes(x = serie, y = MAE, fill = serie)) +
+  geom_boxplot(width = 0.3) +
   # texto % cambio en c/método qm
-  geom_text(data = bx_pct_cambio, aes(label = paste0(pct_, "% \n cambio"), y = max(max_r)), 
-            size = 4, color = "black", fontface = "bold") +
+  #geom_text(data = bx_pct_cambio, aes(label = paste0(pct_, "% \n cambio"), y = max(max_r)), 
+  #          size = 4, color = "black", fontface = "bold") +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(min_r)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
+            vjust = -1 , size = 5) +
+  scale_fill_manual(values = c('diff estacionalmente'="#F8766D",'QM optim'="#00C19F")) +
+  annotate("text", x = 0.6, y = 315, label = "(a)", size=12)+
   # título y nombres de ejes
-  labs(title = "Boxplots del MAE", x = "serie", y = "MAE") +
-  theme_minimal() +
+  labs(title = "", x = "Serie", y = "MAE") +
+  theme_bw() +
+  my_theme_bx(legend = FALSE)
   #coord_cartesian(ylim = c(0, max(bx_$df_outliers$upper_bound)))+
   # sin leyenda y tamaño del texto de los ejes
-  theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
 
 ## Boxplot PBIAS de ensamble métodos BC en ts original vs diff estacionalmente ----
 df_PBIAS_long = df_error_ensemble %>% dplyr::select(PBIAS, d_PBIAS, d_ensemble_PBIAS) %>% 
@@ -2464,44 +2836,50 @@ ggplot(df_PBIAS_long, aes(x = fct_rev(serie), y = PBIAS, fill = serie)) +
         plot.title = element_text(size=14, face="bold")) 
 
 ## Boxplot NSE de ensamble métodos BC en ts original vs diff estacionalmente ----
+
 df_NSE_long = df_error_ensemble %>% dplyr::select(NSE, d_NSE, d_ensemble_NSE) %>% 
   pivot_longer(cols = everything(), names_to = "serie", values_to = "NSE") %>% 
-  mutate(serie = factor(serie))
+  mutate(serie = factor(serie)) %>% 
+  filter(serie != 'NSE') %>% 
+  mutate(serie = factor(serie, levels =c('d_NSE','d_ensemble_NSE'), 
+                        labels =c('diff estacionalmente','QM optim')))
 
 bx_ = bx_text(df_NSE_long, serie, NSE)
 bx_pct_cambio = data.frame(serie = "d_ensemble_NSE",  pct_ = numeric(length("d_")))
 bx_pct_cambio$pct_ = f_pct_cambio(df_error_ensemble, d_NSE, !!sym("d_ensemble_NSE"), perf = "NSE")
+# 1.4% de cambio
+#serie       pct_
+#d_ensemble_NSE 0.01459334
 
 bx_pct_cambio = inner_join(dplyr::select(bx_$df_outliers, c(serie, max_r, upper_bound)),
                            bx_pct_cambio, by = 'serie') %>% 
   mutate(pct_ = round(pct_*100,2))
 
-ggplot(df_NSE_long, aes(x = fct_rev(serie), y = NSE, fill = serie)) +
-  geom_boxplot() +
+bx_QM_NSE_Optim <- ggplot(df_NSE_long, aes(x = serie, y = NSE, fill = serie)) +
+  geom_boxplot(width = 0.3) +
   # texto % cambio en c/método qm
-  geom_text(data = bx_pct_cambio, aes(label = paste0(pct_, "% \n cambio"), y = max(upper_bound)), 
-            size = 4, color = "black", fontface = "bold") +
+  #geom_text(data = bx_pct_cambio, aes(label = paste0(pct_, "% \n cambio"), y = max(upper_bound)), 
+  #          size = 4, color = "black", fontface = "bold") +
   # texto de % outliers
-  geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(lower_bound)), 
-            size = 3, color = "black", fontface = "bold") +
+  #geom_text(data = bx_$df_outliers, aes(label = paste0(outlier_pct, "% \n outliers"), y = min(lower_bound)), 
+  #          size = 3, color = "black", fontface = "bold") +
   # texto quartiles y valores
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q1, label = paste0("Q1: ", round(Q1, 2))), 
-            vjust = 1, size = 4) +
+            vjust = 1, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q2, label = paste0("Q2: ", round(Q2, 2))), 
-            vjust = -0.5, size = 4) +
+            vjust = -0.5, size = 5) +
   geom_text(data = bx_$df_stats, aes(x = serie, y = Q3, label = paste0("Q3: ", round(Q3, 2))), 
-            vjust = -1 , size = 4) +
-  # título y nombres de ejes
-  labs(title = "Boxplots del NSE", x = "serie", y = "NSE") +
-  theme_minimal() +
-  coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), max(bx_$df_outliers$upper_bound)))+
-  # sin leyenda y tamaño del texto de los ejes
-  theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title=element_text(size=14),
-        plot.title = element_text(size=14, face="bold")) 
+            vjust = -1 , size = 5) +
+  scale_fill_manual(values = c('diff estacionalmente'="#F8766D",'QM optim'="#00C19F")) +
+  annotate("text", x = 0.6, y = 1, label = "(b)", size=12)+
+  labs(title = "", x = "Serie", y = "NSE") +
+  theme_bw() +
+  my_theme_bx(legend = FALSE)
+  #coord_cartesian(ylim = c(min(bx_$df_outliers$lower_bound), max(bx_$df_outliers$upper_bound)))+
+  
+grid.arrange(bx_QM_MAE_optim, bx_QM_NSE_Optim, ncol = 2)
 
-## ----
+## mutate d_qm_ensamble pol2_list ----
 
 for(i in 1:len_){
   # crea la col d_qm_ensamble con la serie que min las medidas de desmepño para esa serie
@@ -2559,60 +2937,38 @@ df_cat2 <- function(list = pol2_list, cat_, perf){
 
 df_MAE_mes2 <- df_cat2(list = pol2_list, cat_ = "mes", perf = "MAE")
 
+## Boxplot y lines MAE d_chirps vs d_qm_{ensamble} --------------------------
 df_MAE_mes_long = left_join(df_MAE_mes, rename(df_MAE_mes2, 'MAE_BC' = MAE),
                         by = c("CodigoEstacion", "mes")) %>% 
   pivot_longer(cols = c(MAE, MAE_BC),
                names_to = 'serie',
                values_to = 'MAE') %>% 
-  mutate(serie = ifelse(serie == 'MAE', 'd_chirps', 'd_chirps_BC'))
+  mutate(serie = ifelse(serie == 'MAE', 'd_chirps', 'd_chirps_BC')) %>% 
+  mutate(serie = factor(serie, levels =c('d_chirps','d_chirps_BC'), 
+                        labels =c('diff estacionalmente','QM optim')))
 
 #bx_ = bx_text(df_MAE_mes2, serie = mes, r = MAE)
-
-ggplot(df_MAE_mes_long, aes(x = mes, y = MAE, fill = serie)) +
-  geom_boxplot()
-
-df_MAE_mes_polar = df_MAE_mes_long %>% group_by(mes, serie) %>%
+df_MAE_mes_mean = df_MAE_mes_long %>%  group_by(mes, serie) %>%
   summarise(MAE = mean(MAE, na.rm = TRUE))
 
-df_MAE_mes_polar$mes_num = rep(seq(1, 12, 1), each = 2)
+meses_abrev <- c("ene","feb","mar","abr","may","jun",
+                 "jul","ago","sep","oct","nov","dic")
 
-df_MAE_mes_polar = df_MAE_mes_polar 
-df_MAE_mes_polar_x= filter(df_MAE_mes_polar, mes_num == 12)
-df_MAE_mes_polar_x$mes_num = 0
+df_MAE_mes_mean$mes_abrev <- factor(
+  meses_abrev[match(df_MAE_mes_mean$mes, meses)],
+  levels = meses_abrev)
 
-df_MAE_mes_polar_new <- rbind(df_MAE_mes_polar_x, df_MAE_mes_polar)
-
-polar_plot <- ggplot(df_MAE_mes_polar, aes(x = mes_num, y = MAE, group = serie, color = serie)) +
+bx_QM_MAE_mes <- ggplot(df_MAE_mes_mean, aes(x = mes_abrev, y = MAE, 
+                                             group = serie, color = serie)) +
   geom_line(linewidth = 2 ) +
-  scale_x_continuous(breaks = 1:12) +
-  theme_minimal()
-  
-MAE_max = ceiling(max(df_MAE_mes_polar$MAE) / 25) * 25
-
-polar_plot %+%
-  scale_x_continuous(breaks = 1:12, labels = month.abb)+
-  labs(title = "MAE promedio por mes",x = "Mes", y = "MAE")+
-  theme(legend.position = c(0.9, 0.95),
-        legend.title = element_text(size = 24),
-        legend.text = element_text(size = 24),
-        axis.text.x = element_text(size = 24),
-        axis.text.y = element_text(size = 24),
-        axis.title=element_text(size=24),
-        plot.title = element_text(size=24, face="bold"))
-
-polar_plot %+%
-  df_MAE_mes_polar_new +
-  coord_polar(start = -pi/12) +
-  scale_y_continuous(limits = c(0, MAE_max), breaks = seq(0, MAE_max, by = 25)) +
-  scale_x_continuous(breaks = 1:12, labels = month.abb)+
-  labs(title = "Polar plot del MAE promedio por mes",x = "Mes", y = "MAE") +
-  theme(legend.position = c(0.95, 0.95),
-        legend.title = element_text(size = 24),
-        legend.text = element_text(size = 24),
-        axis.text.x = element_text(size = 24),
-        axis.text.y = element_text(size = 24),
-        axis.title=element_text(size=24),
-        plot.title = element_text(size=24, face="bold")) 
+  coord_cartesian(ylim = c(0,100))+
+  scale_color_manual(values = c('diff estacionalmente'="#F8766D",'QM optim'="#00C19F")) +
+  labs(x = 'Mes')+
+  theme_bw()+
+  guides(color = guide_legend(title = "Serie",
+                              label = TRUE,
+                              override.aes = list(size = 5)))+
+  my_theme_bx()
 
 ## Boxplot y lines PBIAS d_chirps vs d_qm_{ensamble} --------------------------
 df_PBIAS_mes2 <- df_cat2(list = pol2_list, cat_ = "mes", perf = "PBIAS")
@@ -2638,14 +2994,7 @@ ggplot(df_PBIAS_mes_mean, aes(x = mes, y = PBIAS, group = serie, color = serie))
   scale_y_continuous(breaks = seq(-50, 50, 25))+
   coord_cartesian(ylim = c(-50,50))+
   theme_minimal() +
-  labs(title = "PBIAS promedio por mes",x = "Mes", y = "PBIAS")+
-  theme(legend.position = c(0.9, 0.95),
-        legend.title = element_text(size = 24),
-        legend.text = element_text(size = 24),
-        axis.text.x = element_text(size = 24),
-        axis.text.y = element_text(size = 24),
-        axis.title=element_text(size=24),
-        plot.title = element_text(size=24, face="bold"))
+  labs(title = "PBIAS promedio por mes",x = "Mes", y = "PBIAS")
 
 ## Boxplot y lines NSE d_chirps vs d_qm_{ensamble} --------------------------
 df_NSE_mes2 <- df_cat2(list = pol2_list, cat_ = "mes", perf = "NSE")
@@ -2655,46 +3004,64 @@ df_NSE_mes_long = left_join(df_NSE_mes, rename(df_NSE_mes2, 'NSE_BC' = NSE),
   pivot_longer(cols = c(NSE, NSE_BC),
                names_to = 'serie',
                values_to = 'NSE') %>% 
-  mutate(serie = ifelse(serie == 'NSE', 'd_chirps', 'd_chirps_BC'))
+  mutate(serie = ifelse(serie == 'NSE', 'd_chirps', 'd_chirps_BC')) %>% 
+  mutate(serie = factor(serie, levels =c('d_chirps','d_chirps_BC'), 
+                        labels =c('diff estacionalmente','QM optim')))
 
 ggplot(df_NSE_mes_long, aes(x = mes, y = NSE, fill = serie)) +
   geom_boxplot()+
   coord_cartesian(ylim= c(-3,1))
 
-
 df_NSE_mes_mean = df_NSE_mes_long %>%  group_by(mes, serie) %>%
   summarise(NSE = mean(NSE, na.rm = TRUE))
 
-ggplot(df_NSE_mes_mean, aes(x = mes, y = NSE, group = serie, color = serie)) +
+df_NSE_mes_mean$mes_abrev <- factor(
+  meses_abrev[match(df_NSE_mes_mean$mes, meses)],
+  levels = meses_abrev)
+
+bx_QM_NSE_mes <- ggplot(df_NSE_mes_mean, aes(x = mes_abrev, y = NSE, group = serie, color = serie)) +
   geom_line(linewidth = 2 ) +
-  scale_x_discrete(labels = month.abb)+
-  scale_y_continuous(breaks = seq(0, 1, 0.25))+
+  #scale_x_discrete(labels = month.abb)+
+  #scale_y_continuous(breaks = seq(0, 1, 0.25))+
   coord_cartesian(ylim = c(0,1))+
-  theme_minimal() +
-  labs(title = "NSE promedio por mes",x = "Mes", y = "NSE")+
-  theme(legend.position = c(0.9, 0.95),
-        legend.title = element_text(size = 24),
-        legend.text = element_text(size = 24),
-        axis.text.x = element_text(size = 24),
-        axis.text.y = element_text(size = 24),
-        axis.title=element_text(size=24),
-        plot.title = element_text(size=24, face="bold"))
-## Violin plot con boxplot de MAE por región ----
+  scale_color_manual(values = c('diff estacionalmente'="#F8766D",'QM optim'="#00C19F")) +
+  theme_bw() +
+  guides(color = guide_legend(title = "Serie",
+                              label = TRUE,
+                              override.aes = list(size = 5)))+
+  labs(title = "",x = "Mes", y = "NSE")+
+  my_theme_bx()
+
+grid.arrange(bx_QM_MAE_mes, bx_QM_NSE_mes, ncol = 1)
+
+## Boxplot de MAE por región ----
 bx_ = bx_text(subset(sttns.points, !is.na(d_MAE)), serie = region, r = d_MAE)
 
 sttns.points = left_join(sttns.points, 
                          dplyr::select(df_error_ensemble, 
-                                       c(CodigoEstacion, d_ensemble_MAE, d_ensemble_PBIAS, d_ensemble_NSE)),
+                                       #c(CodigoEstacion, d_ensemble_MAE, d_ensemble_PBIAS, d_ensemble_NSE)
+                                       c(CodigoEstacion, d_ensemble_MAE, d_ensemble_NSE)),
                          by = 'CodigoEstacion')
 
-df_MAE_region_long = sttns.points %>% dplyr::select(CodigoEstacion, d_MAE, d_ensemble_MAE, region) %>% 
-  pivot_longer(cols = c(d_MAE, d_ensemble_MAE),
+df_MAE_region_long = sttns.points %>% dplyr::select(CodigoEstacion, d_MAE, d_ensemble_MAE.y, region) %>% 
+  pivot_longer(cols = c(d_MAE, d_ensemble_MAE.y),
                names_to = 'serie',
                values_to = 'MAE') %>% 
-  mutate(serie = ifelse(serie == 'd_MAE', 'd_chirps', 'd_chirps_BC'))
+  mutate(serie = ifelse(serie == 'd_MAE', 'd_chirps', 'd_chirps_BC')) %>% 
+  mutate(serie = factor(serie, levels = c('d_chirps', 'd_chirps_BC'), 
+                        labels = c('diff estacionalmente', 'QM optim')))
 
-ggplot(df_MAE_region_long, aes(x = region, y = MAE, fill = serie)) +
-  geom_boxplot()
+bx_QM_MAE_RN <- ggplot(df_MAE_region_long, 
+                       aes(x = region, y = MAE, fill = region, color = serie)) +
+  geom_boxplot(width =0.3)+
+  scale_fill_manual(values = c("Amazonía" = "#91B495", "Andina" = "#D4B698", "Caribe" = "#F8E595",
+                               "Orinoquía" = "#B5E794", "Pacífica" = "#A59CB3"),
+                    guide = "none") +
+  scale_color_manual(values = c('diff estacionalmente'="#F8766D",'QM optim'="#00C19F"), 
+                     name = 'Serie') +
+  labs(x = 'Región')+
+  theme_bw()+
+  my_theme_bx(legend = TRUE)
 
 df_PBIAS_region_long = sttns.points %>% dplyr::select(CodigoEstacion, d_PBIAS, d_ensemble_PBIAS, region) %>% 
   pivot_longer(cols = c(d_PBIAS, d_ensemble_PBIAS),
@@ -2707,15 +3074,28 @@ ggplot(df_PBIAS_region_long, aes(x = region, y = PBIAS, fill = serie)) +
   scale_y_continuous(labels = percent_format(scale = 1), breaks = seq(-200, 200, 100)) +
   coord_cartesian(ylim = c(-300, 300))
 
-df_NSE_region_long = sttns.points %>% dplyr::select(CodigoEstacion, d_NSE, d_ensemble_NSE, region) %>% 
-  pivot_longer(cols = c(d_NSE, d_ensemble_NSE),
+df_NSE_region_long <- sttns.points %>% dplyr::select(CodigoEstacion, d_NSE, d_ensemble_NSE.y, region) %>% 
+  pivot_longer(cols = c(d_NSE, d_ensemble_NSE.y),
                names_to = 'serie',
                values_to = 'NSE') %>% 
-  mutate(serie = ifelse(serie == 'd_NSE', 'd_chirps', 'd_chirps_BC'))
+  mutate(serie = ifelse(serie == 'd_NSE', 'd_chirps', 'd_chirps_BC')) %>% 
+  mutate(serie = factor(serie, levels = c('d_chirps', 'd_chirps_BC'), 
+                        labels = c('diff estacionalmente', 'QM optim')))
 
-ggplot(df_NSE_region_long, aes(x = region, y = NSE, fill = serie)) +
-  geom_boxplot()
+bx_QM_NSE_RN <- ggplot(df_NSE_region_long, 
+       aes(x = region, y = NSE, fill = region, color = serie)) +
+  geom_boxplot(width =0.3)+
+  scale_fill_manual(values = c("Amazonía" = "#91B495", "Andina" = "#D4B698", "Caribe" = "#F8E595",
+                               "Orinoquía" = "#B5E794", "Pacífica" = "#A59CB3"),
+                    guide = "none") +
+  scale_color_manual(values = c('diff estacionalmente'="#F8766D",'QM optim'="#00C19F"), 
+                     name = 'Serie') +
+  labs(x = 'Región')+
+  coord_cartesian(ylim=c(-1.5,1))+
+  theme_bw()+
+  my_theme_bx(legend = TRUE)
 
+grid.arrange(bx_QM_MAE_RN, bx_QM_NSE_RN, ncol =2)
 # Check point 2 ----
 #save.image('df_eval_metrics_ADF_QM.RData')
 load('df_eval_metrics_ADF_QM.RData')
@@ -4200,3 +4580,4 @@ ggplot(df_d_ccf_R_Spearman, aes(x = Lag, y = Spearman_Correlation)) +
        x = "Lag",
        y = "Coeficiente de Spearman") +
   theme(axis.text.x = element_text(angle = 0, hjust = 0.5))  # Rotar etiquetas en eje X
+
